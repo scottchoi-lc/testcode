@@ -1,0 +1,26 @@
+{
+  "expo": {
+    "name": "Basketball Movement Analyzer",
+    "slug": "basketball-movement-analyzer",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Select a basketball video from your library to analyze.",
+        "NSCameraUsageDescription": "Record a basketball video to analyze."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#131B26"
+      },
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "READ_MEDIA_VIDEO"]
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
