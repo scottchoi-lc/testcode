@@ -3,7 +3,10 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9
 pydantic>=2.7
 opencv-python-headless>=4.10
-numpy>=1.26
+# torch 2.2.x (the last version with Intel-Mac wheels) predates NumPy 2.0's
+# ABI changes, so torch.from_numpy() breaks with "Numpy is not available" if
+# numpy 2.x gets installed. Keep this pinned below 2 until torch is upgraded.
+numpy>=1.26,<2
 Pillow>=10.3
 torch>=2.2
 transformers>=4.44
