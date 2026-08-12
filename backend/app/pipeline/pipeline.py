@@ -243,6 +243,13 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         report(0.6 + 0.4 * (wi + 1) / len(window_starts))
 
     segments = merge_adjacent_segments(scored_windows)
+    logger.info(
+        "Segments: %s",
+        [
+            (s.label.value, round(s.start_time, 1), round(s.end_time, 1), s.dominant_hand)
+            for s in segments
+        ],
+    )
 
     summary: dict[str, float] = {label.value: 0.0 for label in ActionLabel}
     for segment in segments:
