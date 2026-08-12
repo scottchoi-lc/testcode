@@ -37,6 +37,9 @@ class AnalysisResult(BaseModel):
     summary: dict[str, float] = Field(
         default_factory=dict, description="Total seconds spent per action label"
     )
+    narrative: str = Field(
+        "", description="Plain-English play-by-play generated from the segments"
+    )
 
 
 class JobResponse(BaseModel):

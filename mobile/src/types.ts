@@ -17,6 +17,7 @@ export interface AnalysisResult {
   fps_analyzed: number;
   segments: ActionSegment[];
   summary: Record<ActionLabel, number>;
+  narrative: string;
 }
 
 export interface JobResponse {

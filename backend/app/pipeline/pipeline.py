@@ -20,6 +20,7 @@ from app.models.action_classifier import get_action_classifier
 from app.models.detection import Detection, get_detection_model
 from app.models.pose import get_pose_model
 from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
+from app.pipeline.narration import narrate
 from app.pipeline.video_utils import Frame, bbox_center, bbox_diag, euclidean, extract_frames
 from app.schemas import ActionLabel, AnalysisResult
 
@@ -159,4 +160,5 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         fps_analyzed=settings.ANALYSIS_FPS,
         segments=segments,
         summary=summary,
+        narrative=narrate(segments, summary),
     )

@@ -23,6 +23,12 @@ export function ResultsScreen({ videoUri, result, onReset }: Props) {
         isLooping
       />
 
+      {!!result.narrative && (
+        <View style={styles.narrativeBox}>
+          <Text style={styles.narrativeText}>{result.narrative}</Text>
+        </View>
+      )}
+
       <Text style={styles.sectionTitle}>Timeline</Text>
       <ActionTimeline segments={result.segments} durationSeconds={result.duration_seconds} />
 
@@ -62,6 +68,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#000",
     marginBottom: 20,
+  },
+  narrativeBox: {
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+  },
+  narrativeText: {
+    color: "#E5E7EB",
+    fontSize: 14,
+    lineHeight: 20,
   },
   sectionTitle: {
     color: "#F9FAFB",
