@@ -4,13 +4,14 @@ from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segm
 from app.schemas import ActionLabel
 
 
-def _frame(t, player=None, ball=None, dist=None, wrist_high=None):
+def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None):
     return FrameSignals(
         timestamp=t,
         player_center=player,
         ball_center=ball,
         ball_player_distance=dist,
         wrist_above_shoulder=wrist_high,
+        dribbling_hand=hand,
     )
 
 
@@ -99,3 +100,49 @@ def test_merge_adjacent_segments_combines_same_label_windows():
     assert segments[0].end_time == 1.0
     assert segments[0].confidence == 0.7
     assert segments[1].label == ActionLabel.SHOOTING
+
+
+def test_merge_adjacent_segments_votes_dominant_dribbling_hand():
+    from app.pipeline.fusion import ScoredLabel
+
+    w1 = WindowSignals(
+        0.0,
+        0.5,
+        [
+            _frame(0.0, hand="left"),
+            _frame(0.2, hand="left"),
+        ],
+    )
+    w2 = WindowSignals(
+        0.5,
+        1.0,
+        [
+            _frame(0.5, hand="left"),
+            _frame(0.7, hand="right"),
+        ],
+    )
+    scored = [
+        (w1, ScoredLabel(ActionLabel.DRIBBLING, 0.6, {})),
+        (w2, ScoredLabel(ActionLabel.DRIBBLING, 0.7, {})),
+    ]
+    segments = merge_adjacent_segments(scored)
+    assert len(segments) == 1
+    assert segments[0].dominant_hand == "left"
+
+
+def test_merge_adjacent_segments_leaves_dominant_hand_none_without_signal():
+    from app.pipeline.fusion import ScoredLabel
+
+    w1 = WindowSignals(0.0, 0.5, [_frame(0.0)])
+    scored = [(w1, ScoredLabel(ActionLabel.DRIBBLING, 0.6, {}))]
+    segments = merge_adjacent_segments(scored)
+    assert segments[0].dominant_hand is None
+
+
+def test_merge_adjacent_segments_only_sets_dominant_hand_for_dribbling():
+    from app.pipeline.fusion import ScoredLabel
+
+    w1 = WindowSignals(0.0, 0.5, [_frame(0.0, hand="right")])
+    scored = [(w1, ScoredLabel(ActionLabel.SHOOTING, 0.6, {}))]
+    segments = merge_adjacent_segments(scored)
+    assert segments[0].dominant_hand is None

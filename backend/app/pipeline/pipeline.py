@@ -5,7 +5,8 @@ Steps:
   2. Run the HF object-detection model on every sampled frame to find the
      ball and players, and track a single "primary player" across frames.
   3. Run the HF pose model on the primary player's box each frame (best
-     effort - skipped automatically if unavailable).
+     effort - skipped automatically if unavailable). When dribbling, also
+     use wrist-to-ball proximity to call which hand is dribbling.
   4. Run the HF OCR model on a sparse sample of the primary player's torso
      to read a jersey number (also best effort; majority-voted across
      frames so a few bad reads don't win).
@@ -53,7 +54,13 @@ def _pick_ball(balls: list[Detection], player_center: tuple[float, float] | None
     return min(balls, key=lambda d: euclidean(bbox_center(d.box), player_center))
 
 
-def _build_frame_signals(frame: Frame, player: Detection | None, ball: Detection | None, wrist_above_shoulder: bool | None) -> FrameSignals:
+def _build_frame_signals(
+    frame: Frame,
+    player: Detection | None,
+    ball: Detection | None,
+    wrist_above_shoulder: bool | None,
+    dribbling_hand: str | None = None,
+) -> FrameSignals:
     if player is None:
         return FrameSignals(
             timestamp=frame.timestamp,
@@ -61,6 +68,7 @@ def _build_frame_signals(frame: Frame, player: Detection | None, ball: Detection
             ball_center=None,
             ball_player_distance=None,
             wrist_above_shoulder=None,
+            dribbling_hand=None,
         )
 
     scale = bbox_diag(player.box) or 1.0
@@ -80,6 +88,7 @@ def _build_frame_signals(frame: Frame, player: Detection | None, ball: Detection
         ball_center=ball_center_norm,
         ball_player_distance=distance_norm,
         wrist_above_shoulder=wrist_above_shoulder,
+        dribbling_hand=dribbling_hand,
     )
 
 
@@ -97,6 +106,34 @@ def _wrist_above_shoulder(pose_result) -> bool | None:
     left_high = left_wrist[1] < left_shoulder[1] - WRIST_ABOVE_SHOULDER_MARGIN
     right_high = right_wrist[1] < right_shoulder[1] - WRIST_ABOVE_SHOULDER_MARGIN
     return bool(left_high or right_high)
+
+
+def _dribbling_hand(
+    pose_result, ball_box: tuple[float, float, float, float] | None, scale: float
+) -> str | None:
+    """Which wrist is nearest the ball this frame, if close enough to plausibly
+    be controlling it. None if pose/ball data is missing or neither wrist is close.
+
+    ViTPose's "left"/"right" keypoint names follow the COCO convention: they
+    identify the *subject's* own left/right hand (as an annotator looking at
+    the subject would label it), not image-left/right - so this is correct
+    regardless of which way the player is facing the camera.
+    """
+    if pose_result is None or ball_box is None:
+        return None
+    left_wrist = pose_result.get("left_wrist")
+    right_wrist = pose_result.get("right_wrist")
+    if not left_wrist or not right_wrist:
+        return None
+
+    from app.pipeline.fusion import DRIBBLE_HAND_MAX_WRIST_BALL_DIST
+
+    ball_center = bbox_center(ball_box)
+    left_dist = euclidean((left_wrist[0], left_wrist[1]), ball_center) / scale
+    right_dist = euclidean((right_wrist[0], right_wrist[1]), ball_center) / scale
+    if min(left_dist, right_dist) > DRIBBLE_HAND_MAX_WRIST_BALL_DIST:
+        return None
+    return "left" if left_dist < right_dist else "right"
 
 
 def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -> AnalysisResult:
@@ -125,15 +162,21 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         ball = _pick_ball(balls, bbox_center(player.box) if player else None)
 
         wrist_above_shoulder = None
+        dribbling_hand = None
         if player is not None:
             previous_center = bbox_center(player.box)
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
+            dribbling_hand = _dribbling_hand(
+                pose_result, ball.box if ball else None, bbox_diag(player.box) or 1.0
+            )
 
             if i % jersey_ocr_stride == 0:
                 jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
 
-        frame_signals.append(_build_frame_signals(frame, player, ball, wrist_above_shoulder))
+        frame_signals.append(
+            _build_frame_signals(frame, player, ball, wrist_above_shoulder, dribbling_hand)
+        )
         report(0.05 + 0.55 * (i + 1) / len(frames))
 
     player_number = jersey_votes.best_guess()

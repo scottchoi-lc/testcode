@@ -38,7 +38,10 @@ export function ResultsScreen({ videoUri, result, onReset }: Props) {
       <Text style={styles.sectionTitle}>Segments</Text>
       {result.segments.map((segment, index) => (
         <View key={`${segment.start_time}-${index}`} style={styles.segmentRow}>
-          <Text style={styles.segmentLabel}>{LABEL_TITLES[segment.label]}</Text>
+          <Text style={styles.segmentLabel}>
+            {LABEL_TITLES[segment.label]}
+            {segment.dominant_hand ? ` (${segment.dominant_hand} hand)` : ""}
+          </Text>
           <Text style={styles.segmentTime}>
             {segment.start_time.toFixed(1)}s – {segment.end_time.toFixed(1)}s (
             {Math.round(segment.confidence * 100)}% confidence)

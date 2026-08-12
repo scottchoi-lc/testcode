@@ -10,6 +10,7 @@ export interface ActionSegment {
   label: ActionLabel;
   confidence: number;
   evidence: Record<string, unknown>;
+  dominant_hand: "left" | "right" | null;
 }
 
 export interface AnalysisResult {

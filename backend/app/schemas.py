@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +28,14 @@ class ActionSegment(BaseModel):
     label: ActionLabel
     confidence: float = Field(..., ge=0.0, le=1.0)
     evidence: dict = Field(default_factory=dict, description="Debug signals behind the label")
+    dominant_hand: Optional[Literal["left", "right"]] = Field(
+        None,
+        description=(
+            "For DRIBBLING segments, the wrist that was nearest the ball most often "
+            "(majority vote across frames). None if pose data wasn't available/confident "
+            "enough, or the segment isn't a dribbling segment."
+        ),
+    )
 
 
 class AnalysisResult(BaseModel):

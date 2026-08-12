@@ -2,8 +2,10 @@ from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate
 from app.schemas import ActionLabel, ActionSegment
 
 
-def _segment(label, start, end):
-    return ActionSegment(start_time=start, end_time=end, label=label, confidence=0.8)
+def _segment(label, start, end, dominant_hand=None):
+    return ActionSegment(
+        start_time=start, end_time=end, label=label, confidence=0.8, dominant_hand=dominant_hand
+    )
 
 
 def test_narrate_empty_segments_returns_no_actions_message():
@@ -66,3 +68,18 @@ def test_narrate_falls_back_to_generic_wording_without_a_number():
     summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
     result = narrate(segments, summary, player_number=None)
     assert result.startswith("The player dribbled")
+
+
+def test_narrate_mentions_dominant_hand_when_known():
+    segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0, dominant_hand="left")]
+    summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
+    result = narrate(segments, summary)
+    assert result.startswith("The player dribbled the ball with the left hand for 2.0s")
+
+
+def test_narrate_omits_hand_when_unknown():
+    segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0, dominant_hand=None)]
+    summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
+    result = narrate(segments, summary)
+    assert result.startswith("The player dribbled the ball for 2.0s")
+    assert "hand" not in result

@@ -37,11 +37,17 @@ def _should_mention(segment: ActionSegment) -> bool:
     return (segment.end_time - segment.start_time) >= MIN_IDLE_SECONDS_TO_MENTION
 
 
+def _verb_phrase(segment: ActionSegment) -> str:
+    if segment.label == ActionLabel.DRIBBLING and segment.dominant_hand:
+        return f"dribbled the ball with the {segment.dominant_hand} hand"
+    return _VERB_PHRASES[segment.label]
+
+
 def _play_by_play(events: list[ActionSegment], subject: str) -> str:
     clauses = []
     for i, segment in enumerate(events):
         duration = segment.end_time - segment.start_time
-        verb = _VERB_PHRASES[segment.label]
+        verb = _verb_phrase(segment)
         prefix = subject if i == 0 else "then"
         clauses.append(f"{prefix} {verb} for {duration:.1f}s")
     return ", ".join(clauses) + "."

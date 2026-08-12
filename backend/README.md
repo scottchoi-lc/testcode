@@ -25,6 +25,14 @@ segments with a `start_time`/`end_time`/`confidence`, and
 `app/pipeline/narration.py` turns the merged segments into a plain-English
 play-by-play (`AnalysisResult.narrative`).
 
+For DRIBBLING segments, the pipeline also calls which hand is doing the
+dribbling: each frame it checks which of the pose model's `left_wrist` /
+`right_wrist` keypoints is nearest the ball, and the merged segment's
+`dominant_hand` is a majority vote of those per-frame calls (`None` if pose
+data wasn't available/confident enough). ViTPose's left/right keypoint
+labels are anatomical (the *player's* left/right), not image-left/right, so
+this is correct regardless of camera angle.
+
 This is a heuristic, best-effort system, not a validated basketball-specific
 classifier — see "Improving accuracy" below for the natural next step
 (fine-tuning a dedicated model on labeled basketball footage). Jersey-number

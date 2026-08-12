@@ -15,6 +15,7 @@ module - which keeps it fast to unit test without downloading any models.
 from __future__ import annotations
 
 import statistics
+from collections import Counter
 from dataclasses import dataclass, field
 
 from app.schemas import ActionLabel
@@ -39,6 +40,11 @@ DRIBBLE_VERTICAL_STD_MAX = 0.35
 PLAYER_MOVE_MIN_DISPLACEMENT = 0.5
 WRIST_ABOVE_SHOULDER_MARGIN = 0.02
 
+# Wrist-to-ball distance (player-bbox-diagonal units) below which that wrist
+# is considered plausibly in control of the ball, for calling which hand is
+# dribbling. Matches BALL_POSSESSION_MAX_DIST's scale.
+DRIBBLE_HAND_MAX_WRIST_BALL_DIST = 0.9
+
 
 @dataclass
 class FrameSignals:
@@ -51,6 +57,7 @@ class FrameSignals:
     ball_center: tuple[float, float] | None
     ball_player_distance: float | None  # None if either is missing
     wrist_above_shoulder: bool | None  # None if pose unavailable
+    dribbling_hand: str | None = None  # "left" | "right" | None; which wrist is nearest the ball
 
 
 @dataclass
@@ -204,14 +211,22 @@ def score_window(window: WindowSignals) -> ScoredLabel:
 
 
 def merge_adjacent_segments(scored_windows: list[tuple[WindowSignals, ScoredLabel]]):
-    """Merge consecutive windows sharing the same label into single segments."""
+    """Merge consecutive windows sharing the same label into single segments.
+
+    Also majority-votes a dominant dribbling hand ("left"/"right") across
+    every frame in a merged DRIBBLING segment, from each frame's
+    `dribbling_hand` (whichever wrist was nearest the ball that frame).
+    """
     from app.schemas import ActionSegment
 
     segments: list[ActionSegment] = []
+    hand_counters: list[Counter] = []
     for window, scored in scored_windows:
+        window_hand_votes = Counter(f.dribbling_hand for f in window.frames if f.dribbling_hand)
         if segments and segments[-1].label == scored.label:
             segments[-1].end_time = window.end_time
             segments[-1].confidence = max(segments[-1].confidence, scored.confidence)
+            hand_counters[-1].update(window_hand_votes)
         else:
             segments.append(
                 ActionSegment(
@@ -222,4 +237,10 @@ def merge_adjacent_segments(scored_windows: list[tuple[WindowSignals, ScoredLabe
                     evidence=scored.evidence,
                 )
             )
+            hand_counters.append(window_hand_votes)
+
+    for segment, counter in zip(segments, hand_counters):
+        if segment.label == ActionLabel.DRIBBLING and counter:
+            segment.dominant_hand = counter.most_common(1)[0][0]
+
     return segments
