@@ -7,7 +7,7 @@ of what the tracked player was doing: **dribbling**, **shooting**,
 ## How it works
 
 There is no single Hugging Face model that classifies exactly these four
-basketball-specific actions, so the pipeline combines three off-the-shelf
+basketball-specific actions, so the pipeline combines several off-the-shelf
 models with a small rule-based fusion layer:
 
 | Stage | Model | Purpose |
@@ -15,16 +15,23 @@ models with a small rule-based fusion layer:
 | Detection | [`hustvl/yolos-tiny`](https://huggingface.co/hustvl/yolos-tiny) | Finds the ball ("sports ball") and players ("person") in each sampled frame (COCO classes). |
 | Pose | [`usyd-community/vitpose-base-simple`](https://huggingface.co/usyd-community/vitpose-base-simple) | Estimates the tracked player's keypoints (wrists, shoulders, ...) per frame. Optional — the pipeline degrades gracefully if it's unavailable. |
 | Action context | [`MCG-NJU/videomae-base-finetuned-kinetics`](https://huggingface.co/MCG-NJU/videomae-base-finetuned-kinetics) | Classifies short clip windows against Kinetics-400, which includes classes like "dribbling basketball" and "shooting basketball". |
+| Jersey number | [`microsoft/trocr-base-printed`](https://huggingface.co/microsoft/trocr-base-printed) | Best-effort OCR on the tracked player's torso, majority-voted across a sample of frames, to personalize the narrative ("Player #23 dribbled...") when a number is legible. Falls back to generic "the player" wording otherwise — see `app/models/jersey_ocr.py`. |
 
 `app/pipeline/fusion.py` combines ball-to-player distance/trajectory, wrist
 height relative to the shoulder, and the Kinetics label into one of the four
 target labels per analysis window (`app/pipeline/pipeline.py` orchestrates
 the whole thing). Adjacent windows with the same label are merged into
-segments with a `start_time`/`end_time`/`confidence`.
+segments with a `start_time`/`end_time`/`confidence`, and
+`app/pipeline/narration.py` turns the merged segments into a plain-English
+play-by-play (`AnalysisResult.narrative`).
 
 This is a heuristic, best-effort system, not a validated basketball-specific
 classifier — see "Improving accuracy" below for the natural next step
-(fine-tuning a dedicated model on labeled basketball footage).
+(fine-tuning a dedicated model on labeled basketball footage). Jersey-number
+OCR in particular is a hard target on casual phone video (motion blur,
+camera angle, curved fabric) — expect `detected_player_number` to often be
+`null` rather than a wrong guess, by design (see `JerseyNumberAggregator`'s
+voting thresholds).
 
 ## Running locally
 
@@ -34,7 +41,7 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The first request that hits `/analyze` will download the three model
+The first request that hits `/analyze` will download the four model
 checkpoints from Hugging Face (several GB total) and cache them under the
 default `~/.cache/huggingface`. Set `DEVICE=cuda` (see `app/config.py`) if
 you have a GPU available — inference on CPU works but is slow for anything

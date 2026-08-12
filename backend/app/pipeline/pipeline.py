@@ -6,10 +6,14 @@ Steps:
      ball and players, and track a single "primary player" across frames.
   3. Run the HF pose model on the primary player's box each frame (best
      effort - skipped automatically if unavailable).
-  4. Slide a window over the sampled frames; run the HF video-classification
+  4. Run the HF OCR model on a sparse sample of the primary player's torso
+     to read a jersey number (also best effort; majority-voted across
+     frames so a few bad reads don't win).
+  5. Slide a window over the sampled frames; run the HF video-classification
      model (VideoMAE/Kinetics) on the raw frames in each window.
-  5. Fuse all of the above per window via `app.pipeline.fusion.score_window`.
-  6. Merge adjacent same-label windows into the final segment timeline.
+  6. Fuse all of the above per window via `app.pipeline.fusion.score_window`.
+  7. Merge adjacent same-label windows into the final segment timeline, and
+     generate a plain-English narrative from them.
 """
 from __future__ import annotations
 
@@ -18,6 +22,7 @@ from typing import Callable
 from app.config import settings
 from app.models.action_classifier import get_action_classifier
 from app.models.detection import Detection, get_detection_model
+from app.models.jersey_ocr import JerseyNumberAggregator, get_jersey_number_reader
 from app.models.pose import get_pose_model
 from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
 from app.pipeline.narration import narrate
@@ -104,6 +109,9 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
 
     detection_model = get_detection_model()
     pose_model = get_pose_model()
+    jersey_reader = get_jersey_number_reader()
+    jersey_votes = JerseyNumberAggregator()
+    jersey_ocr_stride = max(1, len(frames) // settings.JERSEY_OCR_MAX_SAMPLES)
 
     frame_signals: list[FrameSignals] = []
     previous_center: tuple[float, float] | None = None
@@ -119,8 +127,13 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
 
+            if i % jersey_ocr_stride == 0:
+                jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
+
         frame_signals.append(_build_frame_signals(frame, player, ball, wrist_above_shoulder))
         report(0.05 + 0.55 * (i + 1) / len(frames))
+
+    player_number = jersey_votes.best_guess()
 
     action_classifier = get_action_classifier()
     window_size = settings.ACTION_WINDOW_FRAMES
@@ -160,5 +173,6 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         fps_analyzed=settings.ANALYSIS_FPS,
         segments=segments,
         summary=summary,
-        narrative=narrate(segments, summary),
+        narrative=narrate(segments, summary, player_number=player_number),
+        detected_player_number=player_number,
     )

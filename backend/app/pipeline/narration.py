@@ -37,12 +37,12 @@ def _should_mention(segment: ActionSegment) -> bool:
     return (segment.end_time - segment.start_time) >= MIN_IDLE_SECONDS_TO_MENTION
 
 
-def _play_by_play(events: list[ActionSegment]) -> str:
+def _play_by_play(events: list[ActionSegment], subject: str) -> str:
     clauses = []
     for i, segment in enumerate(events):
         duration = segment.end_time - segment.start_time
         verb = _VERB_PHRASES[segment.label]
-        prefix = "The player" if i == 0 else "then"
+        prefix = subject if i == 0 else "then"
         clauses.append(f"{prefix} {verb} for {duration:.1f}s")
     return ", ".join(clauses) + "."
 
@@ -63,12 +63,17 @@ def _totals_summary(summary: dict[str, float]) -> str:
     return "Overall: " + ", ".join(parts) + "."
 
 
-def narrate(segments: list[ActionSegment], summary: dict[str, float]) -> str:
+def narrate(
+    segments: list[ActionSegment],
+    summary: dict[str, float],
+    player_number: str | None = None,
+) -> str:
     events = [s for s in segments if _should_mention(s)]
     if not events:
         return NO_ACTIONS_MESSAGE
 
-    narrative = _play_by_play(events)
+    subject = f"Player #{player_number}" if player_number else "The player"
+    narrative = _play_by_play(events, subject)
     totals = _totals_summary(summary)
     if totals:
         narrative = f"{narrative} {totals}"

@@ -18,6 +18,7 @@ export interface AnalysisResult {
   segments: ActionSegment[];
   summary: Record<ActionLabel, number>;
   narrative: string;
+  detected_player_number: string | null;
 }
 
 export interface JobResponse {

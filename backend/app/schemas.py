@@ -40,6 +40,13 @@ class AnalysisResult(BaseModel):
     narrative: str = Field(
         "", description="Plain-English play-by-play generated from the segments"
     )
+    detected_player_number: Optional[str] = Field(
+        None,
+        description=(
+            "Jersey number read off the tracked player via OCR, if enough frames agreed. "
+            "None means no confident reading - the narrative falls back to generic wording."
+        ),
+    )
 
 
 class JobResponse(BaseModel):

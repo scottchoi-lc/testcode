@@ -48,3 +48,21 @@ def test_narrate_skips_short_idle_gaps_but_keeps_long_ones():
     assert "then passed the ball for 0.7s" in result
     assert "then paused for 2.0s" in result
     assert result.count("paused") == 1
+
+
+def test_narrate_uses_player_number_when_given():
+    segments = [
+        _segment(ActionLabel.DRIBBLING, 0.0, 2.0),
+        _segment(ActionLabel.SHOOTING, 2.0, 2.8),
+    ]
+    summary = {"dribbling": 2.0, "shooting": 0.8, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
+    result = narrate(segments, summary, player_number="23")
+    assert result.startswith("Player #23 dribbled the ball for 2.0s")
+    assert "The player" not in result
+
+
+def test_narrate_falls_back_to_generic_wording_without_a_number():
+    segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0)]
+    summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
+    result = narrate(segments, summary, player_number=None)
+    assert result.startswith("The player dribbled")

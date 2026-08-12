@@ -10,6 +10,7 @@ class Settings:
     DETECTION_MODEL: str = os.getenv("DETECTION_MODEL", "hustvl/yolos-tiny")
     POSE_MODEL: str = os.getenv("POSE_MODEL", "usyd-community/vitpose-base-simple")
     ACTION_MODEL: str = os.getenv("ACTION_MODEL", "MCG-NJU/videomae-base-finetuned-kinetics")
+    JERSEY_OCR_MODEL: str = os.getenv("JERSEY_OCR_MODEL", "microsoft/trocr-base-printed")
 
     # Torch device: "cuda", "mps", or "cpu". Auto-detected at runtime if left as "auto".
     DEVICE: str = os.getenv("DEVICE", "auto")
@@ -24,6 +25,12 @@ class Settings:
     # Detection confidence thresholds.
     PERSON_SCORE_THRESHOLD: float = float(os.getenv("PERSON_SCORE_THRESHOLD", "0.5"))
     BALL_SCORE_THRESHOLD: float = float(os.getenv("BALL_SCORE_THRESHOLD", "0.3"))
+
+    # Jersey number OCR is run on at most this many frames per clip (evenly
+    # spaced), regardless of clip length - it's a per-frame model call, and
+    # results are majority-voted, so more than ~20 samples adds runtime
+    # without meaningfully improving the vote.
+    JERSEY_OCR_MAX_SAMPLES: int = int(os.getenv("JERSEY_OCR_MAX_SAMPLES", "20"))
 
     # Storage.
     UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", "/tmp/basketball_analyzer/uploads"))
