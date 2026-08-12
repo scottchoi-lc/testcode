@@ -12,7 +12,7 @@ models with a small rule-based fusion layer:
 
 | Stage | Model | Purpose |
 |---|---|---|
-| Detection | [`hustvl/yolos-tiny`](https://huggingface.co/hustvl/yolos-tiny) | Finds the ball ("sports ball") and players ("person") in each sampled frame (COCO classes). |
+| Detection | [`hustvl/yolos-small`](https://huggingface.co/hustvl/yolos-small) | Finds the ball ("sports ball") and players ("person") in each sampled frame (COCO classes). Upgraded from `yolos-tiny`, which under-detected the ball on real footage (~40% of frames in one test clip) — `yolos-small` trades slower CPU inference for meaningfully better recall on a small, fast-moving object; `yolos-tiny` is a drop-in fallback via `DETECTION_MODEL` if that trade-off doesn't work for you. |
 | Pose | [`usyd-community/vitpose-base-simple`](https://huggingface.co/usyd-community/vitpose-base-simple) | Estimates the tracked player's keypoints (wrists, shoulders, ...) per frame. Optional — the pipeline degrades gracefully if it's unavailable. |
 | Action context | [`MCG-NJU/videomae-base-finetuned-kinetics`](https://huggingface.co/MCG-NJU/videomae-base-finetuned-kinetics) | Classifies short clip windows against Kinetics-400, which includes classes like "dribbling basketball" and "shooting basketball". |
 | Jersey number | [`microsoft/trocr-base-printed`](https://huggingface.co/microsoft/trocr-base-printed) | Best-effort OCR on the tracked player's torso, majority-voted across a sample of frames, to personalize the narrative ("Player #23 dribbled...") when a number is legible. Falls back to generic "the player" wording otherwise — see `app/models/jersey_ocr.py`. |
