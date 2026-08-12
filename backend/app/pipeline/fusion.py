@@ -213,6 +213,13 @@ def score_window(window: WindowSignals) -> ScoredLabel:
 def merge_adjacent_segments(scored_windows: list[tuple[WindowSignals, ScoredLabel]]):
     """Merge consecutive windows sharing the same label into single segments.
 
+    Analysis windows overlap (ACTION_WINDOW_STRIDE < ACTION_WINDOW_FRAMES, so
+    consecutive windows share frames for classifier context), so a new
+    window's start_time can fall before the previous segment's end_time. A
+    new segment's start is clamped to the previous segment's end so the
+    output timeline is contiguous and non-overlapping, which is what the
+    mobile timeline UI and the narrative's sequential wording both assume.
+
     Also majority-votes a dominant dribbling hand ("left"/"right") across
     every frame in a merged DRIBBLING segment, from each frame's
     `dribbling_hand` (whichever wrist was nearest the ball that frame).
@@ -228,9 +235,12 @@ def merge_adjacent_segments(scored_windows: list[tuple[WindowSignals, ScoredLabe
             segments[-1].confidence = max(segments[-1].confidence, scored.confidence)
             hand_counters[-1].update(window_hand_votes)
         else:
+            start_time = window.start_time
+            if segments:
+                start_time = max(start_time, segments[-1].end_time)
             segments.append(
                 ActionSegment(
-                    start_time=window.start_time,
+                    start_time=start_time,
                     end_time=window.end_time,
                     label=scored.label,
                     confidence=scored.confidence,

@@ -102,6 +102,34 @@ def test_merge_adjacent_segments_combines_same_label_windows():
     assert segments[1].label == ActionLabel.SHOOTING
 
 
+def test_merge_adjacent_segments_produces_non_overlapping_boundaries():
+    from app.pipeline.fusion import ScoredLabel
+
+    # Overlapping windows (50% overlap, like ACTION_WINDOW_STRIDE <
+    # ACTION_WINDOW_FRAMES in real usage): window 2 starts before window 1
+    # ends. A naive label change should not let segment 2 start earlier
+    # than segment 1's end.
+    w1 = WindowSignals(0.0, 2.5, [])
+    w2 = WindowSignals(1.3, 3.8, [])
+    w3 = WindowSignals(2.7, 5.2, [])
+    scored = [
+        (w1, ScoredLabel(ActionLabel.IDLE, 0.3, {})),
+        (w2, ScoredLabel(ActionLabel.PASSING, 0.6, {})),
+        (w3, ScoredLabel(ActionLabel.MOVING_WITHOUT_BALL, 0.5, {})),
+    ]
+    segments = merge_adjacent_segments(scored)
+    assert len(segments) == 3
+    assert segments[0].start_time == 0.0
+    assert segments[0].end_time == 2.5
+    # Clamped to the previous segment's end instead of the raw (overlapping) window start.
+    assert segments[1].start_time == 2.5
+    assert segments[1].end_time == 3.8
+    assert segments[2].start_time == 3.8
+    assert segments[2].end_time == 5.2
+    for a, b in zip(segments, segments[1:]):
+        assert a.end_time <= b.start_time
+
+
 def test_merge_adjacent_segments_votes_dominant_dribbling_hand():
     from app.pipeline.fusion import ScoredLabel
 
