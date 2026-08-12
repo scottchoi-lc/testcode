@@ -116,10 +116,19 @@ class JerseyNumberReader:
 
 
 class JerseyNumberAggregator:
-    """Collects per-frame OCR readings and produces a majority-vote guess."""
+    """Collects per-frame OCR readings and produces a majority-vote guess.
+
+    Two separate things determine confidence, and they must not be blended
+    into one fraction: how often a frame yields *any* digit reading at all
+    (often low on hard footage - blur, angle, occlusion - and that's fine),
+    versus, among the readings that did happen, how much they agree with
+    each other (the real signal for "did we read the right number"). Only
+    the latter is checked against MIN_FRACTION; a clip where 5 of 24 frames
+    read anything but 3 of those 5 agreed is a good result, not a bad one.
+    """
 
     MIN_VOTES = 3
-    MIN_FRACTION = 0.25
+    MIN_FRACTION = 0.5
 
     def __init__(self):
         self._counter: Counter[str] = Counter()
@@ -136,14 +145,16 @@ class JerseyNumberAggregator:
         number, votes = self._counter.most_common(1)[0]
         if votes < self.MIN_VOTES:
             return None
-        if self._total and votes / self._total < self.MIN_FRACTION:
+        total_readings = sum(self._counter.values())
+        if votes / total_readings < self.MIN_FRACTION:
             return None
         return number
 
     def debug_summary(self) -> str:
         """Human-readable vote breakdown, for logging why a guess was/wasn't made."""
         votes = dict(self._counter.most_common())
-        return f"{self._total} samples, readings={votes or '{}'}"
+        total_readings = sum(self._counter.values())
+        return f"{self._total} samples, {total_readings} with a digit, readings={votes or '{}'}"
 
 
 @lru_cache(maxsize=1)
