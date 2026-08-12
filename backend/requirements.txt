@@ -11,6 +11,11 @@ Pillow>=10.3
 torch>=2.2
 transformers>=4.44
 accelerate>=0.33
+# Required by the ViTPose image processor (app/models/pose.py). transformers
+# treats scipy as an optional backend but doesn't guard every ViTPose code
+# path on it, so without it pose estimation fails with a confusing
+# "NameError: name 'inv' is not defined" instead of a clear missing-dep error.
+scipy>=1.11
 
 # dev/test
 pytest>=8.0

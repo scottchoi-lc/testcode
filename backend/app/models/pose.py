@@ -80,9 +80,24 @@ class PoseModel:
     def estimate(
         self, image_bgr: np.ndarray, person_box: tuple[float, float, float, float]
     ) -> PoseResult | None:
-        """Estimate keypoints for a single person box in a single frame."""
+        """Estimate keypoints for a single person box in a single frame.
+
+        Any failure here (a bad box, an edge case in the model/processor,
+        etc.) is treated the same as the model being unavailable: pose is an
+        optional signal, so we log and return None rather than let one bad
+        frame crash the whole analysis job.
+        """
         if not self._ensure_loaded():
             return None
+        try:
+            return self._estimate(image_bgr, person_box)
+        except Exception:  # noqa: BLE001 - genuinely optional signal
+            logger.warning("Pose estimation failed for a frame; skipping.", exc_info=True)
+            return None
+
+    def _estimate(
+        self, image_bgr: np.ndarray, person_box: tuple[float, float, float, float]
+    ) -> PoseResult | None:
         import torch
         from PIL import Image
 
