@@ -17,6 +17,7 @@ Steps:
 """
 from __future__ import annotations
 
+import logging
 from typing import Callable
 
 from app.config import settings
@@ -28,6 +29,8 @@ from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segm
 from app.pipeline.narration import narrate
 from app.pipeline.video_utils import Frame, bbox_center, bbox_diag, euclidean, extract_frames
 from app.schemas import ActionLabel, AnalysisResult
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[float], None]
 
@@ -134,6 +137,7 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         report(0.05 + 0.55 * (i + 1) / len(frames))
 
     player_number = jersey_votes.best_guess()
+    logger.info("Jersey OCR result: guess=%r (%s)", player_number, jersey_votes.debug_summary())
 
     action_classifier = get_action_classifier()
     window_size = settings.ACTION_WINDOW_FRAMES

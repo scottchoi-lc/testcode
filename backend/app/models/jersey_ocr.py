@@ -110,7 +110,9 @@ class JerseyNumberReader:
         text = self._processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
         match = _DIGIT_RE.search(text)
-        return match.group(0) if match else None
+        reading = match.group(0) if match else None
+        logger.debug("Jersey OCR raw read: %r -> %r", text, reading)
+        return reading
 
 
 class JerseyNumberAggregator:
@@ -137,6 +139,11 @@ class JerseyNumberAggregator:
         if self._total and votes / self._total < self.MIN_FRACTION:
             return None
         return number
+
+    def debug_summary(self) -> str:
+        """Human-readable vote breakdown, for logging why a guess was/wasn't made."""
+        votes = dict(self._counter.most_common())
+        return f"{self._total} samples, readings={votes or '{}'}"
 
 
 @lru_cache(maxsize=1)
