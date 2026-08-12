@@ -109,7 +109,10 @@ def _wrist_above_shoulder(pose_result) -> bool | None:
 
 
 def _dribbling_hand(
-    pose_result, ball_box: tuple[float, float, float, float] | None, scale: float
+    pose_result,
+    ball_box: tuple[float, float, float, float] | None,
+    scale: float,
+    stats: dict | None = None,
 ) -> str | None:
     """Which wrist is nearest the ball this frame, if close enough to plausibly
     be controlling it. None if pose/ball data is missing or neither wrist is close.
@@ -118,12 +121,21 @@ def _dribbling_hand(
     identify the *subject's* own left/right hand (as an annotator looking at
     the subject would label it), not image-left/right - so this is correct
     regardless of which way the player is facing the camera.
+
+    `stats`, if given, is mutated with counters for diagnosing *why* a clip
+    isn't producing hand calls (no pose data vs. wrist-to-ball too far, etc).
     """
+    if stats is not None:
+        stats["frames_with_pose"] += pose_result is not None
+        stats["frames_with_ball"] += ball_box is not None
+
     if pose_result is None or ball_box is None:
         return None
     left_wrist = pose_result.get("left_wrist")
     right_wrist = pose_result.get("right_wrist")
     if not left_wrist or not right_wrist:
+        if stats is not None:
+            stats["frames_missing_wrist_keypoints"] += 1
         return None
 
     from app.pipeline.fusion import DRIBBLE_HAND_MAX_WRIST_BALL_DIST
@@ -131,7 +143,12 @@ def _dribbling_hand(
     ball_center = bbox_center(ball_box)
     left_dist = euclidean((left_wrist[0], left_wrist[1]), ball_center) / scale
     right_dist = euclidean((right_wrist[0], right_wrist[1]), ball_center) / scale
-    if min(left_dist, right_dist) > DRIBBLE_HAND_MAX_WRIST_BALL_DIST:
+    closest = min(left_dist, right_dist)
+
+    if stats is not None:
+        stats["closest_dist_min"] = min(stats["closest_dist_min"], closest)
+
+    if closest > DRIBBLE_HAND_MAX_WRIST_BALL_DIST:
         return None
     return "left" if left_dist < right_dist else "right"
 
@@ -155,6 +172,14 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
 
     frame_signals: list[FrameSignals] = []
     previous_center: tuple[float, float] | None = None
+    hand_debug_stats = {
+        "frames_with_player": 0,
+        "frames_with_pose": 0,
+        "frames_with_ball": 0,
+        "frames_missing_wrist_keypoints": 0,
+        "closest_dist_min": float("inf"),
+    }
+    hand_votes: dict[str, int] = {"left": 0, "right": 0}
 
     for i, frame in enumerate(frames):
         balls, people = detection_model.detect_ball_and_players(frame.image)
@@ -164,12 +189,15 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         wrist_above_shoulder = None
         dribbling_hand = None
         if player is not None:
+            hand_debug_stats["frames_with_player"] += 1
             previous_center = bbox_center(player.box)
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
             dribbling_hand = _dribbling_hand(
-                pose_result, ball.box if ball else None, bbox_diag(player.box) or 1.0
+                pose_result, ball.box if ball else None, bbox_diag(player.box) or 1.0, hand_debug_stats
             )
+            if dribbling_hand:
+                hand_votes[dribbling_hand] += 1
 
             if i % jersey_ocr_stride == 0:
                 jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
@@ -178,6 +206,13 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
             _build_frame_signals(frame, player, ball, wrist_above_shoulder, dribbling_hand)
         )
         report(0.05 + 0.55 * (i + 1) / len(frames))
+
+    logger.info(
+        "Dribbling-hand debug: %d frames total, %s, votes=%s",
+        len(frames),
+        hand_debug_stats,
+        hand_votes,
+    )
 
     player_number = jersey_votes.best_guess()
     logger.info("Jersey OCR result: guess=%r (%s)", player_number, jersey_votes.debug_summary())
