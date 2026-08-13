@@ -33,6 +33,7 @@ export function SelectPlayerScreen({ video, onContinue, onError }: Props) {
   const [currentPosition, setCurrentPosition] = useState(0);
   const [preview, setPreview] = useState<PreviewFrameResponse | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
   const cancelled = useRef(false);
 
   useEffect(() => {
@@ -66,6 +67,7 @@ export function SelectPlayerScreen({ video, onContinue, onError }: Props) {
     if (!videoId) return;
     setLoadingPreview(true);
     setPreview(null);
+    setSelectedIndex(null);
     try {
       const result = await getPreviewFrame(videoId, currentPosition);
       setPreview(result);
@@ -76,9 +78,17 @@ export function SelectPlayerScreen({ video, onContinue, onError }: Props) {
     }
   };
 
-  const selectBox = (box: DetectedPersonBox) => {
-    if (!videoId || !preview) return;
-    onContinue({ videoId, selectedBox: box, selectedTimestamp: preview.timestamp });
+  const tapBox = (index: number) => {
+    setSelectedIndex((current) => (current === index ? null : index));
+  };
+
+  const confirmSelection = () => {
+    if (!videoId || !preview || selectedIndex === null) return;
+    onContinue({
+      videoId,
+      selectedBox: preview.people[selectedIndex],
+      selectedTimestamp: preview.timestamp,
+    });
   };
 
   const skip = () => {
@@ -95,8 +105,8 @@ export function SelectPlayerScreen({ video, onContinue, onError }: Props) {
       <Text style={styles.title}>Focus on a player?</Text>
       <Text style={styles.subtitle}>
         Scrub the video to a moment where the player you want is clearly visible, tap
-        &quot;Use this frame&quot;, then tap them. Or skip to analyze whoever the default tracker
-        picks.
+        &quot;Use this frame&quot;, then tap them to select and confirm. Or skip to analyze
+        whoever the default tracker picks.
       </Text>
 
       {uploading ? (
@@ -130,27 +140,51 @@ export function SelectPlayerScreen({ video, onContinue, onError }: Props) {
                 source={{ uri: `data:image/jpeg;base64,${preview.image_base64}` }}
                 style={{ width: displayWidth, height: displayHeight, borderRadius: 12 }}
               />
-              {preview.people.map((box, index) => (
-                <Pressable
-                  key={index}
-                  onPress={() => selectBox(box)}
-                  style={[
-                    styles.playerBox,
-                    {
-                      left: box.x1 * scale,
-                      top: box.y1 * scale,
-                      width: (box.x2 - box.x1) * scale,
-                      height: (box.y2 - box.y1) * scale,
-                    },
-                  ]}
-                />
-              ))}
+              {preview.people.map((box, index) => {
+                const isSelected = index === selectedIndex;
+                return (
+                  <Pressable
+                    key={index}
+                    onPress={() => tapBox(index)}
+                    style={[
+                      styles.playerBox,
+                      isSelected && styles.playerBoxSelected,
+                      {
+                        left: box.x1 * scale,
+                        top: box.y1 * scale,
+                        width: (box.x2 - box.x1) * scale,
+                        height: (box.y2 - box.y1) * scale,
+                      },
+                    ]}
+                  >
+                    {isSelected && (
+                      <View style={styles.selectedBadge}>
+                        <Text style={styles.selectedBadgeText}>✓ Selected</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                );
+              })}
               {preview.people.length === 0 && (
                 <Text style={styles.noPeopleText}>
                   No players detected in this frame — try a different moment.
                 </Text>
               )}
             </View>
+          )}
+
+          {preview && preview.people.length > 0 && (
+            <Text style={styles.selectionHint}>
+              {selectedIndex === null
+                ? "Tap a player above to select them."
+                : "Tap again to deselect, or continue below."}
+            </Text>
+          )}
+
+          {selectedIndex !== null && (
+            <Pressable style={styles.confirmButton} onPress={confirmSelection}>
+              <Text style={styles.confirmButtonText}>Continue with this player</Text>
+            </Pressable>
           )}
 
           <Pressable style={styles.skipButton} onPress={skip}>
@@ -217,11 +251,48 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: "rgba(249, 115, 22, 0.15)",
   },
+  playerBoxSelected: {
+    borderColor: "#22C55E",
+    borderWidth: 4,
+    backgroundColor: "rgba(34, 197, 94, 0.25)",
+  },
+  selectedBadge: {
+    position: "absolute",
+    top: -26,
+    left: -4,
+    backgroundColor: "#22C55E",
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  selectedBadgeText: {
+    color: "#0B1220",
+    fontSize: 11,
+    fontWeight: "700",
+  },
   noPeopleText: {
     color: "#9CA3AF",
     fontSize: 13,
     textAlign: "center",
     marginTop: 12,
+  },
+  selectionHint: {
+    color: "#9CA3AF",
+    fontSize: 12,
+    textAlign: "center",
+    marginTop: 10,
+  },
+  confirmButton: {
+    backgroundColor: "#22C55E",
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    marginTop: 14,
+  },
+  confirmButtonText: {
+    color: "#0B1220",
+    fontSize: 15,
+    fontWeight: "700",
   },
   skipButton: {
     marginTop: 20,
