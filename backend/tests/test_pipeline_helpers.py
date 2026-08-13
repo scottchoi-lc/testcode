@@ -1,6 +1,6 @@
 """Unit tests for pure-logic helpers in app.pipeline.pipeline. No models,
 no video I/O - these only need numpy/opencv importable (see README)."""
-from app.pipeline.pipeline import _nearest_kinetics_labels
+from app.pipeline.pipeline import _bidirectional_frame_order, _nearest_kinetics_labels
 
 
 def test_nearest_kinetics_labels_picks_closest_midpoint():
@@ -18,3 +18,23 @@ def test_nearest_kinetics_labels_picks_closest_midpoint():
 
 def test_nearest_kinetics_labels_empty_input_returns_empty():
     assert _nearest_kinetics_labels([], midpoint=1.0) == []
+
+
+def test_bidirectional_frame_order_seed_in_middle():
+    forward, backward = _bidirectional_frame_order(num_frames=10, seed_index=4)
+    assert forward == [4, 5, 6, 7, 8, 9]
+    assert backward == [3, 2, 1, 0]
+    # Every index appears exactly once across both lists.
+    assert sorted(forward + backward) == list(range(10))
+
+
+def test_bidirectional_frame_order_seed_at_start():
+    forward, backward = _bidirectional_frame_order(num_frames=5, seed_index=0)
+    assert forward == [0, 1, 2, 3, 4]
+    assert backward == []
+
+
+def test_bidirectional_frame_order_seed_at_end():
+    forward, backward = _bidirectional_frame_order(num_frames=5, seed_index=4)
+    assert forward == [4]
+    assert backward == [3, 2, 1, 0]

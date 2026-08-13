@@ -84,17 +84,3 @@ def narrate(
     if totals:
         narrative = f"{narrative} {totals}"
     return narrative
-
-
-def player_identification_note(
-    target_jersey_number: str | None, player_match_found: bool | None
-) -> str | None:
-    """User-facing caveat for when a requested jersey number couldn't be
-    confidently matched to a player before tracking began. None when no
-    number was requested, or when it was found (no caveat needed)."""
-    if not target_jersey_number or player_match_found is None or player_match_found:
-        return None
-    return (
-        f"Couldn't confirm player #{target_jersey_number} in this clip — "
-        "showing results for the tracked player instead."
-    )

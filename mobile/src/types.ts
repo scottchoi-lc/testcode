@@ -20,9 +20,7 @@ export interface AnalysisResult {
   summary: Record<ActionLabel, number>;
   narrative: string;
   detected_player_number: string | null;
-  requested_player_number: string | null;
-  player_match_found: boolean | null;
-  player_identification_note: string | null;
+  player_selected: boolean;
 }
 
 export interface JobResponse {
@@ -31,4 +29,28 @@ export interface JobResponse {
   progress: number;
   error?: string | null;
   result?: AnalysisResult | null;
+}
+
+export interface UploadVideoResponse {
+  video_id: string;
+  duration_seconds: number;
+  frame_width: number;
+  frame_height: number;
+}
+
+export interface DetectedPersonBox {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  score: number;
+}
+
+export interface PreviewFrameResponse {
+  video_id: string;
+  timestamp: number;
+  frame_width: number;
+  frame_height: number;
+  image_base64: string;
+  people: DetectedPersonBox[];
 }

@@ -39,10 +39,12 @@ fine-tuned classifier trained on labeled basketball clips.
 
 Results also include a plain-English play-by-play narrative
 (`app/pipeline/narration.py`) that calls out which hand a player is
-dribbling with when detectable, and there's an optional way to focus
-analysis on one player by jersey number
-(`app/pipeline/identification.py`) — see `backend/README.md` for how each
-works.
+dribbling with when detectable. You can also focus analysis on one player
+by tapping them on a preview frame before analyzing (`POST /videos` →
+`POST /videos/{id}/preview-frame` → tap → `POST /analyze`) instead of
+leaving it to the default "largest person in frame 0" heuristic — see
+`backend/README.md`'s "Focusing on a specific player" for how the
+preview/selection flow and the resulting bidirectional tracking work.
 
 ## Quickstart
 

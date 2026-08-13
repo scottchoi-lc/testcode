@@ -59,12 +59,11 @@ class Settings:
     # without meaningfully improving the vote.
     JERSEY_OCR_MAX_SAMPLES: int = int(os.getenv("JERSEY_OCR_MAX_SAMPLES", "20"))
 
-    # When a target jersey number is requested, scan up to this many of the
-    # earliest sampled frames - OCR-ing every detected person in each, not
-    # just one - to find which tracked person matches before main tracking
-    # begins. Kept small since this runs an extra detection + OCR pass per
-    # person per frame on top of the normal per-clip cost.
-    PLAYER_ID_MAX_FRAMES: int = int(os.getenv("PLAYER_ID_MAX_FRAMES", "10"))
+    # JPEG quality (0-100) for preview frames returned by
+    # POST /videos/{id}/preview-frame - the select-a-player screen only
+    # needs to look decent at phone-screen size, so this favors a smaller/
+    # faster response over maximum fidelity.
+    PREVIEW_FRAME_JPEG_QUALITY: int = int(os.getenv("PREVIEW_FRAME_JPEG_QUALITY", "80"))
 
     # Storage.
     UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", "/tmp/basketball_analyzer/uploads"))

@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
 import { pollJobUntilDone, submitVideoForAnalysis } from "@/api/client";
-import type { SelectedVideo } from "@/screens/HomeScreen";
+import type { PlayerSelection } from "@/screens/SelectPlayerScreen";
 import type { AnalysisResult } from "@/types";
 
 interface Props {
-  video: SelectedVideo;
+  selection: PlayerSelection;
   onComplete: (result: AnalysisResult) => void;
   onError: (message: string) => void;
   onCancel: () => void;
@@ -19,7 +19,7 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "Analysis failed",
 };
 
-export function AnalyzeScreen({ video, onComplete, onError, onCancel }: Props) {
+export function AnalyzeScreen({ selection, onComplete, onError, onCancel }: Props) {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState("queued");
   const cancelled = useRef({ cancelled: false });
@@ -29,7 +29,11 @@ export function AnalyzeScreen({ video, onComplete, onError, onCancel }: Props) {
 
     (async () => {
       try {
-        const job = await submitVideoForAnalysis(video.uri, video.fileName, video.jerseyNumber);
+        const job = await submitVideoForAnalysis(
+          selection.videoId,
+          selection.selectedBox,
+          selection.selectedTimestamp
+        );
         setStatus(job.status);
 
         const finalJob = await pollJobUntilDone(
@@ -60,7 +64,7 @@ export function AnalyzeScreen({ video, onComplete, onError, onCancel }: Props) {
       cancelled.current.cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video.uri]);
+  }, [selection.videoId]);
 
   return (
     <View style={styles.container}>

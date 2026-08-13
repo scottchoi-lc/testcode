@@ -1,15 +1,11 @@
 import axios from "axios";
 
 import { API_BASE_URL, JOB_POLL_INTERVAL_MS } from "@/config";
-import type { JobResponse } from "@/types";
+import type { DetectedPersonBox, JobResponse, PreviewFrameResponse, UploadVideoResponse } from "@/types";
 
 const client = axios.create({ baseURL: API_BASE_URL, timeout: 60_000 });
 
-export async function submitVideoForAnalysis(
-  videoUri: string,
-  fileName: string,
-  jerseyNumber?: string
-): Promise<JobResponse> {
+export async function uploadVideo(videoUri: string, fileName: string): Promise<UploadVideoResponse> {
   const form = new FormData();
   // React Native's FormData accepts this { uri, name, type } shape for files.
   form.append("video", {
@@ -17,13 +13,44 @@ export async function submitVideoForAnalysis(
     name: fileName,
     type: "video/mp4",
   } as unknown as Blob);
-  if (jerseyNumber) {
-    form.append("jersey_number", jerseyNumber);
+
+  const response = await client.post<UploadVideoResponse>("/videos", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 120_000,
+  });
+  return response.data;
+}
+
+export async function getPreviewFrame(videoId: string, timestamp: number): Promise<PreviewFrameResponse> {
+  const form = new FormData();
+  form.append("timestamp", String(timestamp));
+
+  const response = await client.post<PreviewFrameResponse>(
+    `/videos/${videoId}/preview-frame`,
+    form,
+    { headers: { "Content-Type": "multipart/form-data" }, timeout: 30_000 }
+  );
+  return response.data;
+}
+
+export async function submitVideoForAnalysis(
+  videoId: string,
+  selectedBox?: DetectedPersonBox,
+  selectedTimestamp?: number
+): Promise<JobResponse> {
+  const form = new FormData();
+  form.append("video_id", videoId);
+  if (selectedBox && selectedTimestamp != null) {
+    form.append(
+      "selected_box",
+      JSON.stringify([selectedBox.x1, selectedBox.y1, selectedBox.x2, selectedBox.y2])
+    );
+    form.append("selected_timestamp", String(selectedTimestamp));
   }
 
   const response = await client.post<JobResponse>("/analyze", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: 120_000,
+    timeout: 30_000,
   });
   return response.data;
 }

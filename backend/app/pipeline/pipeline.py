@@ -2,12 +2,14 @@
 
 Steps:
   1. Sample frames from the video at `settings.ANALYSIS_FPS`.
-  1a. If a target jersey number was requested, scan the first
-      PLAYER_ID_MAX_FRAMES frames (every detected person, not just one) to
-      find which person matches it (`app.pipeline.identification`), and use
-      their position to seed which player gets tracked below. Falls back to
-      the default heuristic (largest person in frame 0) if no confident
-      match is found.
+  1a. If the caller tapped a specific player in a preview frame
+      (`selected_player_box`/`selected_timestamp`), tracking is seeded from
+      that exact detection at the frame nearest that timestamp, and
+      processed *bidirectionally* - forward to the end of the clip, then
+      backward to the start - since the selection can be anywhere in the
+      clip, not just the beginning. Otherwise frames are processed in the
+      normal 0..N order, seeded by the default heuristic (largest person in
+      frame 0).
   2. Run the HF object-detection model on every sampled frame to find the
      ball and players, and track a single "primary player" across frames.
   3. Run the HF pose model on the primary player's box each frame (best
@@ -15,7 +17,8 @@ Steps:
      use wrist-to-ball proximity to call which hand is dribbling.
   4. Run the HF OCR model on a sparse sample of the primary player's torso
      to read a jersey number (also best effort; majority-voted across
-     frames so a few bad reads don't win).
+     frames so a few bad reads don't win) - purely for display in the
+     narrative, unrelated to player selection.
   5. Slide a *coarse* window (ACTION_WINDOW_FRAMES/STRIDE) over the sampled
      frames; run the HF video-classification model (VideoMAE/Kinetics) on
      the raw frames in each - this is the expensive step, so it stays
@@ -40,8 +43,7 @@ from app.models.detection import Detection, get_detection_model
 from app.models.jersey_ocr import JerseyNumberAggregator, get_jersey_number_reader
 from app.models.pose import get_pose_model
 from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
-from app.pipeline.identification import PlayerIdentifier
-from app.pipeline.narration import narrate, player_identification_note
+from app.pipeline.narration import narrate
 from app.pipeline.video_utils import Frame, bbox_center, bbox_diag, euclidean, extract_frames
 from app.schemas import ActionLabel, AnalysisResult
 
@@ -179,6 +181,20 @@ def _wrist_ball_signal(
     return hand, closest
 
 
+def _bidirectional_frame_order(num_frames: int, seed_index: int) -> tuple[list[int], list[int]]:
+    """Frame processing order for tracking anchored at `seed_index`: forward
+    from the seed to the end of the clip, then backward from just before the
+    seed to the start. Returned as two separate lists (rather than one
+    combined list) because tracking continuity resets to the seed position
+    at the start of *each* direction - it's the one frame with a confirmed
+    player position, so both directions walk outward from it independently
+    rather than the backward pass continuing from wherever the forward pass
+    ended up."""
+    forward = list(range(seed_index, num_frames))
+    backward = list(range(seed_index - 1, -1, -1))
+    return forward, backward
+
+
 def _nearest_kinetics_labels(
     kinetics_windows: list[tuple[float, float, list[tuple[str, float]]]], midpoint: float
 ) -> list[tuple[str, float]]:
@@ -195,7 +211,8 @@ def _nearest_kinetics_labels(
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
-    target_jersey_number: str | None = None,
+    selected_player_box: tuple[float, float, float, float] | None = None,
+    selected_timestamp: float | None = None,
 ) -> AnalysisResult:
     def report(fraction: float) -> None:
         if progress_cb:
@@ -213,32 +230,7 @@ def run_pipeline(
     jersey_votes = JerseyNumberAggregator()
     jersey_ocr_stride = max(1, len(frames) // settings.JERSEY_OCR_MAX_SAMPLES)
 
-    previous_center: tuple[float, float] | None = None
-    player_match_found: bool | None = None
-    loop_start_fraction = 0.05
-    if target_jersey_number:
-        player_match_found = False
-        identifier = PlayerIdentifier(target_jersey_number)
-        id_frame_count = min(len(frames), settings.PLAYER_ID_MAX_FRAMES)
-        for frame in frames[:id_frame_count]:
-            _, id_people = detection_model.detect_ball_and_players(frame.image)
-            identifier.observe(
-                id_people, lambda box, f=frame: jersey_reader.read_crop(f.image, box)
-            )
-        seed_box = identifier.best_match_box()
-        if seed_box is not None:
-            previous_center = bbox_center(seed_box)
-            player_match_found = True
-        logger.info(
-            "Player identification: target=%r matched=%s (%s)",
-            target_jersey_number,
-            player_match_found,
-            identifier.debug_summary(),
-        )
-        loop_start_fraction = 0.15
-        report(loop_start_fraction)
-
-    frame_signals: list[FrameSignals] = []
+    frame_signals: list[FrameSignals | None] = [None] * len(frames)
     hand_debug_stats = {
         "frames_with_player": 0,
         "frames_with_pose": 0,
@@ -247,8 +239,10 @@ def run_pipeline(
         "closest_dist_min": float("inf"),
     }
     hand_votes: dict[str, int] = {"left": 0, "right": 0}
+    processed_count = 0
 
-    for i, frame in enumerate(frames):
+    def process_index(i: int, previous_center: tuple[float, float] | None) -> tuple[float, float] | None:
+        frame = frames[i]
         balls, people = detection_model.detect_ball_and_players(frame.image)
         player = _pick_primary_player(people, previous_center)
         ball = _pick_ball(balls, bbox_center(player.box) if player else None)
@@ -256,9 +250,10 @@ def run_pipeline(
         wrist_above_shoulder = None
         dribbling_hand = None
         ball_wrist_distance = None
+        new_previous_center = previous_center
         if player is not None:
             hand_debug_stats["frames_with_player"] += 1
-            previous_center = bbox_center(player.box)
+            new_previous_center = bbox_center(player.box)
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
             dribbling_hand, ball_wrist_distance = _wrist_ball_signal(
@@ -270,15 +265,40 @@ def run_pipeline(
             if i % jersey_ocr_stride == 0:
                 jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
 
-        frame_signals.append(
-            _build_frame_signals(
-                frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance
-            )
+        frame_signals[i] = _build_frame_signals(
+            frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance
         )
-        report(loop_start_fraction + (0.6 - loop_start_fraction) * (i + 1) / len(frames))
+        return new_previous_center
+
+    def report_frame_progress() -> None:
+        nonlocal processed_count
+        processed_count += 1
+        report(0.05 + 0.55 * processed_count / len(frames))
+
+    player_selected = selected_player_box is not None and selected_timestamp is not None
+    if player_selected:
+        seed_index = max(0, min(len(frames) - 1, round(selected_timestamp * settings.ANALYSIS_FPS)))
+        forward_order, backward_order = _bidirectional_frame_order(len(frames), seed_index)
+        seed_center = bbox_center(selected_player_box)
+
+        previous_center = seed_center
+        for i in forward_order:
+            previous_center = process_index(i, previous_center)
+            report_frame_progress()
+
+        previous_center = seed_center
+        for i in backward_order:
+            previous_center = process_index(i, previous_center)
+            report_frame_progress()
+    else:
+        previous_center = None
+        for i in range(len(frames)):
+            previous_center = process_index(i, previous_center)
+            report_frame_progress()
 
     logger.info(
-        "Dribbling-hand debug: %d frames total, %s, votes=%s",
+        "Player selection: %s. Dribbling-hand debug: %d frames total, %s, votes=%s",
+        "tapped player" if player_selected else "default heuristic",
         len(frames),
         hand_debug_stats,
         hand_votes,
@@ -348,23 +368,12 @@ def run_pipeline(
 
     report(1.0)
 
-    # If we confidently identified the requested player before tracking
-    # began, that's a more authoritative number for the narrative subject
-    # than the passive OCR aggregate (which keeps sampling the whole clip
-    # regardless and could disagree or come back empty) - otherwise fall
-    # back to that aggregate, same as when no number was requested at all.
-    narrative_player_number = target_jersey_number if player_match_found else player_number
-
     return AnalysisResult(
         duration_seconds=duration,
         fps_analyzed=settings.ANALYSIS_FPS,
         segments=segments,
         summary=summary,
-        narrative=narrate(segments, summary, player_number=narrative_player_number),
+        narrative=narrate(segments, summary, player_number=player_number),
         detected_player_number=player_number,
-        requested_player_number=target_jersey_number,
-        player_match_found=player_match_found,
-        player_identification_note=player_identification_note(
-            target_jersey_number, player_match_found
-        ),
+        player_selected=player_selected,
     )

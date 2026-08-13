@@ -47,6 +47,38 @@ def extract_frames(video_path: str, target_fps: float) -> tuple[list[Frame], flo
     return frames, duration
 
 
+def probe_video(video_path: str) -> tuple[float, int, int]:
+    """Return (duration_seconds, width, height) without decoding every frame."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+    cap.release()
+    duration = frame_count / fps if fps > 0 else 0.0
+    return duration, width, height
+
+
+def extract_frame_at(video_path: str, timestamp: float) -> np.ndarray:
+    """Return the single BGR frame nearest ``timestamp`` seconds into the clip."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"Could not open video file: {video_path}")
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    target_index = max(0, round(timestamp * fps))
+    if frame_count > 0:
+        target_index = min(target_index, frame_count - 1)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, target_index)
+    ok, image = cap.read()
+    cap.release()
+    if not ok:
+        raise ValueError(f"Could not read a frame near timestamp {timestamp}s")
+    return image
+
+
 def bbox_center(box: tuple[float, float, float, float]) -> tuple[float, float]:
     x1, y1, x2, y2 = box
     return (x1 + x2) / 2.0, (y1 + y2) / 2.0

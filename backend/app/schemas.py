@@ -55,21 +55,13 @@ class AnalysisResult(BaseModel):
             "None means no confident reading - the narrative falls back to generic wording."
         ),
     )
-    requested_player_number: Optional[str] = Field(
-        None, description="Jersey number the caller asked to focus on, if any (POST /analyze field)."
-    )
-    player_match_found: Optional[bool] = Field(
-        None,
+    player_selected: bool = Field(
+        False,
         description=(
-            "None if no player was requested. True if requested_player_number was confidently "
-            "matched to a specific player before tracking began, and the rest of this result "
-            "reflects that player. False if requested but not found - the tracked player is "
-            "whoever the default heuristic picked instead; see player_identification_note."
+            "True if the caller tapped a specific player in the preview frame (POST /analyze's "
+            "selected_box/selected_timestamp) and tracking was seeded from that exact detection. "
+            "False if the default heuristic (largest person in frame 0) picked the tracked player."
         ),
-    )
-    player_identification_note: Optional[str] = Field(
-        None,
-        description="User-facing caveat when player_match_found is False. None otherwise.",
     )
 
 
@@ -79,3 +71,27 @@ class JobResponse(BaseModel):
     progress: float = Field(0.0, ge=0.0, le=1.0)
     error: Optional[str] = None
     result: Optional[AnalysisResult] = None
+
+
+class UploadVideoResponse(BaseModel):
+    video_id: str
+    duration_seconds: float
+    frame_width: int
+    frame_height: int
+
+
+class DetectedPersonBox(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+    score: float
+
+
+class PreviewFrameResponse(BaseModel):
+    video_id: str
+    timestamp: float
+    frame_width: int
+    frame_height: int
+    image_base64: str = Field(..., description="JPEG-encoded preview frame, base64-encoded")
+    people: list[DetectedPersonBox]

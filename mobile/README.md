@@ -27,17 +27,22 @@ device via Expo Go, since the phone can't resolve the dev machine's
 
 ## Structure
 
-- `App.tsx` — top-level screen state machine (home → analyzing → results). No
-  navigation library is used since the flow is strictly linear.
+- `App.tsx` — top-level screen state machine (home → selectPlayer →
+  analyzing → results). No navigation library is used since the flow is
+  strictly linear.
 - `src/screens/HomeScreen.tsx` — record via camera or pick a video from the
-  library (`expo-image-picker`), with an optional jersey number field to
-  focus analysis on a specific player.
-- `src/screens/AnalyzeScreen.tsx` — uploads the video + jersey number
-  (`src/api/client.ts`) and polls `/jobs/{id}` for progress until the
-  analysis finishes.
-- `src/screens/ResultsScreen.tsx` — video playback (`expo-av`), a warning
-  banner if a requested jersey number couldn't be confidently matched
-  (`result.player_identification_note`), plus the action timeline and
+  library (`expo-image-picker`).
+- `src/screens/SelectPlayerScreen.tsx` — uploads the clip (`POST /videos`),
+  shows it with native playback controls so you can scrub to a moment where
+  the player you want is visible, fetches a preview frame with detected
+  player boxes (`POST /videos/{id}/preview-frame`) on demand, and lets you
+  tap one to focus the analysis on that exact person — or skip to fall back
+  to the default auto-picked player.
+- `src/screens/AnalyzeScreen.tsx` — kicks off `POST /analyze` with the
+  already-uploaded `video_id` (+ the selected box/timestamp, if any) and
+  polls `/jobs/{id}` for progress until the analysis finishes.
+- `src/screens/ResultsScreen.tsx` — video playback (`expo-av`), a small note
+  when `result.player_selected` is true, plus the action timeline and
   per-action breakdown.
 - `src/components/ActionTimeline.tsx` / `SummaryBreakdown.tsx` — presentation
   components shared by the results screen.

@@ -72,18 +72,39 @@ without adding more model inference calls.
 
 ### Focusing on a specific player
 
-`POST /analyze` accepts an optional `jersey_number` form field (1-2 digits).
-When set, `app/pipeline/identification.py`'s `PlayerIdentifier` scans the
-first `PLAYER_ID_MAX_FRAMES` sampled frames — OCR-ing *every* detected
-person in each, not just one — and clusters matching detections across
-frames by proximity to find whichever person is consistently read as that
-number. If found, that person's last-seen position seeds the main tracker
-(the same nearest-neighbor continuity `_pick_primary_player` already does
-frame-to-frame) instead of the default "largest person in frame 0"
-heuristic. If not confidently found, analysis proceeds on whichever player
-the default heuristic picks, and `AnalysisResult.player_identification_note`
-carries a user-facing caveat (`player_match_found` is `false`) rather than
-silently analyzing a possibly-wrong player.
+Rather than guessing (an earlier version of this let you type a jersey
+number and tried to OCR-match it — replaced because OCR matching is
+unreliable and gives no way to be sure it picked the right person), the app
+lets you *tap* the player you want directly on a preview frame. This is a
+three-endpoint flow:
+
+1. `POST /videos` — upload the clip once; returns a `video_id` plus probed
+   `duration_seconds`/`frame_width`/`frame_height`. The file is kept on
+   disk (`app/videos/store.py`'s `VideoStore`) so it doesn't need
+   re-uploading for the next two steps.
+2. `POST /videos/{video_id}/preview-frame` (form field `timestamp`) —
+   extracts the nearest frame at that timestamp (`extract_frame_at` in
+   `video_utils.py`), runs the same HF detection model used during
+   analysis to find every visible person, and returns the frame as a JPEG
+   plus each person's box. The client can call this as many times as it
+   wants (e.g. while scrubbing) before committing to a selection.
+3. `POST /analyze` — takes `video_id` plus optional `selected_box`
+   (JSON-encoded `[x1, y1, x2, y2]`, in the *same pixel space* as the
+   preview frame it came from) and `selected_timestamp`. If provided,
+   `AnalysisResult.player_selected` is `true` and tracking is seeded from
+   that exact detection - no ambiguity, since it's a confirmed tap rather
+   than an inferred match.
+
+Because the tap can happen at *any* point in the clip, tracking can't just
+seed frame 0 and walk forward - the player may have moved a lot between
+t=0 and the selected timestamp. Instead `run_pipeline` finds the sampled
+frame nearest `selected_timestamp` and processes *bidirectionally* from
+there: forward to the end of the clip, then backward to the start,
+resetting to the exact selected position at the start of each direction
+(`_bidirectional_frame_order`, `_process_index` in `pipeline.py`). With no
+selection, frames are processed in the normal 0..N order seeded by the
+default heuristic (largest person in frame 0), same as before this
+feature existed.
 
 ## Running locally
 
@@ -101,11 +122,16 @@ beyond short clips.
 
 ## API
 
-- `POST /analyze` — multipart upload with a `video` field (any format
-  OpenCV/ffmpeg can decode) and an optional `jersey_number` field (1-2
-  digits) to focus analysis on a specific player — see "Focusing on a
-  specific player" above. Returns `{ job_id, status }` immediately;
-  analysis runs in the background.
+- `POST /videos` — multipart upload with a `video` field (any format
+  OpenCV/ffmpeg can decode). Returns `UploadVideoResponse`
+  (`video_id`/`duration_seconds`/`frame_width`/`frame_height`).
+- `POST /videos/{video_id}/preview-frame` — form field `timestamp` (seconds).
+  Returns `PreviewFrameResponse`: the nearest frame as a base64 JPEG plus
+  every detected person's box, for the tap-to-select-a-player UI.
+- `POST /analyze` — form fields `video_id` (required), and optionally
+  `selected_box` (JSON `[x1, y1, x2, y2]` from a preview-frame response)
+  and `selected_timestamp` — see "Focusing on a specific player" above.
+  Returns `{ job_id, status }` immediately; analysis runs in the background.
 - `GET /jobs/{job_id}` — poll for `{ status, progress, result, error }`.
   `status` is one of `queued | processing | done | failed`. `result` is
   populated once `status == "done"` and matches `AnalysisResult` in
