@@ -1,4 +1,4 @@
-from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate
+from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate, player_identification_note
 from app.schemas import ActionLabel, ActionSegment
 
 
@@ -83,3 +83,17 @@ def test_narrate_omits_hand_when_unknown():
     result = narrate(segments, summary)
     assert result.startswith("The player dribbled the ball for 2.0s")
     assert "hand" not in result
+
+
+def test_player_identification_note_none_when_no_number_requested():
+    assert player_identification_note(None, None) is None
+
+
+def test_player_identification_note_none_when_match_found():
+    assert player_identification_note("23", True) is None
+
+
+def test_player_identification_note_present_when_no_match():
+    note = player_identification_note("23", False)
+    assert note is not None
+    assert "23" in note

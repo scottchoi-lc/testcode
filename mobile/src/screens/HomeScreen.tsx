@@ -1,10 +1,11 @@
 import * as ImagePicker from "expo-image-picker";
-import React from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useState } from "react";
+import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
 export interface SelectedVideo {
   uri: string;
   fileName: string;
+  jerseyNumber?: string;
 }
 
 interface Props {
@@ -17,10 +18,17 @@ function fileNameFromUri(uri: string): string {
 }
 
 export function HomeScreen({ onVideoSelected }: Props) {
+  const [jerseyNumber, setJerseyNumber] = useState("");
+
   const handlePicked = (result: ImagePicker.ImagePickerResult) => {
     if (result.canceled || result.assets.length === 0) return;
     const asset = result.assets[0];
-    onVideoSelected({ uri: asset.uri, fileName: asset.fileName ?? fileNameFromUri(asset.uri) });
+    const trimmed = jerseyNumber.trim();
+    onVideoSelected({
+      uri: asset.uri,
+      fileName: asset.fileName ?? fileNameFromUri(asset.uri),
+      jerseyNumber: trimmed || undefined,
+    });
   };
 
   const recordVideo = async () => {
@@ -58,6 +66,22 @@ export function HomeScreen({ onVideoSelected }: Props) {
         and off-ball movement.
       </Text>
 
+      <Text style={styles.label}>Jersey number (optional)</Text>
+      <TextInput
+        style={styles.input}
+        value={jerseyNumber}
+        onChangeText={(text) => setJerseyNumber(text.replace(/[^0-9]/g, "").slice(0, 2))}
+        placeholder="e.g. 23"
+        placeholderTextColor="#6B7280"
+        keyboardType="number-pad"
+        maxLength={2}
+      />
+      <Text style={styles.hint}>
+        Focus the analysis on a specific player. If we can&apos;t confidently find this number in
+        the clip, we&apos;ll fall back to tracking whoever the default heuristic picks and let you
+        know.
+      </Text>
+
       <Pressable style={styles.primaryButton} onPress={recordVideo}>
         <Text style={styles.primaryButtonText}>Record a video</Text>
       </Pressable>
@@ -89,6 +113,28 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 36,
     lineHeight: 21,
+  },
+  label: {
+    color: "#E5E7EB",
+    fontSize: 14,
+    fontWeight: "600",
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#374151",
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    color: "#F9FAFB",
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  hint: {
+    color: "#6B7280",
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 24,
   },
   primaryButton: {
     backgroundColor: "#F97316",

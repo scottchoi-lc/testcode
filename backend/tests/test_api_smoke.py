@@ -42,7 +42,7 @@ def test_analyze_end_to_end_with_stubbed_pipeline(monkeypatch, tmp_path):
         summary={label.value: 0.0 for label in ActionLabel} | {"dribbling": 2.0},
     )
 
-    def fake_run_pipeline(video_path, progress_cb=None):
+    def fake_run_pipeline(video_path, progress_cb=None, target_jersey_number=None):
         if progress_cb:
             progress_cb(1.0)
         return fake_result
@@ -64,3 +64,45 @@ def test_analyze_end_to_end_with_stubbed_pipeline(monkeypatch, tmp_path):
     body = status_resp.json()
     assert body["status"] == JobStatus.DONE.value
     assert body["result"]["segments"][0]["label"] == "dribbling"
+
+
+def test_analyze_passes_normalized_jersey_number_to_pipeline(monkeypatch):
+    fake_result = AnalysisResult(duration_seconds=1.0, fps_analyzed=6.0, segments=[], summary={})
+    captured = {}
+
+    def fake_run_pipeline(video_path, progress_cb=None, target_jersey_number=None):
+        captured["target_jersey_number"] = target_jersey_number
+        return fake_result
+
+    monkeypatch.setattr(main_module, "run_pipeline", fake_run_pipeline)
+
+    client = TestClient(main_module.app)
+    resp = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", io.BytesIO(b"\x00" * 1024), "video/mp4")},
+        data={"jersey_number": " 23 "},
+    )
+    assert resp.status_code == 200
+    client.get(f"/jobs/{resp.json()['job_id']}")
+    assert captured["target_jersey_number"] == "23"
+
+
+def test_analyze_ignores_invalid_jersey_number(monkeypatch):
+    fake_result = AnalysisResult(duration_seconds=1.0, fps_analyzed=6.0, segments=[], summary={})
+    captured = {}
+
+    def fake_run_pipeline(video_path, progress_cb=None, target_jersey_number=None):
+        captured["target_jersey_number"] = target_jersey_number
+        return fake_result
+
+    monkeypatch.setattr(main_module, "run_pipeline", fake_run_pipeline)
+
+    client = TestClient(main_module.app)
+    resp = client.post(
+        "/analyze",
+        files={"video": ("clip.mp4", io.BytesIO(b"\x00" * 1024), "video/mp4")},
+        data={"jersey_number": "abc"},
+    )
+    assert resp.status_code == 200
+    client.get(f"/jobs/{resp.json()['job_id']}")
+    assert captured["target_jersey_number"] is None

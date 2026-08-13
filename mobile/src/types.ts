@@ -20,6 +20,9 @@ export interface AnalysisResult {
   summary: Record<ActionLabel, number>;
   narrative: string;
   detected_player_number: string | null;
+  requested_player_number: string | null;
+  player_match_found: boolean | null;
+  player_identification_note: string | null;
 }
 
 export interface JobResponse {

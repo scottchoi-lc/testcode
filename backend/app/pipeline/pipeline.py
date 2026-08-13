@@ -2,6 +2,12 @@
 
 Steps:
   1. Sample frames from the video at `settings.ANALYSIS_FPS`.
+  1a. If a target jersey number was requested, scan the first
+      PLAYER_ID_MAX_FRAMES frames (every detected person, not just one) to
+      find which person matches it (`app.pipeline.identification`), and use
+      their position to seed which player gets tracked below. Falls back to
+      the default heuristic (largest person in frame 0) if no confident
+      match is found.
   2. Run the HF object-detection model on every sampled frame to find the
      ball and players, and track a single "primary player" across frames.
   3. Run the HF pose model on the primary player's box each frame (best
@@ -10,11 +16,18 @@ Steps:
   4. Run the HF OCR model on a sparse sample of the primary player's torso
      to read a jersey number (also best effort; majority-voted across
      frames so a few bad reads don't win).
-  5. Slide a window over the sampled frames; run the HF video-classification
-     model (VideoMAE/Kinetics) on the raw frames in each window.
-  6. Fuse all of the above per window via `app.pipeline.fusion.score_window`.
-  7. Merge adjacent same-label windows into the final segment timeline, and
-     generate a plain-English narrative from them.
+  5. Slide a *coarse* window (ACTION_WINDOW_FRAMES/STRIDE) over the sampled
+     frames; run the HF video-classification model (VideoMAE/Kinetics) on
+     the raw frames in each - this is the expensive step, so it stays
+     relatively infrequent.
+  6. Slide a separate, much *finer* window (FUSION_WINDOW_SECONDS) over the
+     same per-frame ball/pose signals - cheap, since no model inference is
+     needed here - and fuse each one via `app.pipeline.fusion.score_window`,
+     borrowing whichever coarse window's kinetics label is temporally
+     closest. This is what gives the narrative event-level granularity
+     instead of one label per ~2.5s coarse window.
+  7. Merge adjacent same-label fine windows into the final segment
+     timeline, and generate a plain-English narrative from them.
 """
 from __future__ import annotations
 
@@ -27,7 +40,8 @@ from app.models.detection import Detection, get_detection_model
 from app.models.jersey_ocr import JerseyNumberAggregator, get_jersey_number_reader
 from app.models.pose import get_pose_model
 from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
-from app.pipeline.narration import narrate
+from app.pipeline.identification import PlayerIdentifier
+from app.pipeline.narration import narrate, player_identification_note
 from app.pipeline.video_utils import Frame, bbox_center, bbox_diag, euclidean, extract_frames
 from app.schemas import ActionLabel, AnalysisResult
 
@@ -165,7 +179,24 @@ def _wrist_ball_signal(
     return hand, closest
 
 
-def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -> AnalysisResult:
+def _nearest_kinetics_labels(
+    kinetics_windows: list[tuple[float, float, list[tuple[str, float]]]], midpoint: float
+) -> list[tuple[str, float]]:
+    """Pick the coarse VideoMAE window whose time span is temporally closest
+    to a fine fusion window's midpoint, and return its top labels. Lets many
+    small fusion windows share one (expensive) kinetics inference call from
+    whichever coarse window covers roughly the same moment."""
+    if not kinetics_windows:
+        return []
+    best = min(kinetics_windows, key=lambda kw: abs((kw[0] + kw[1]) / 2 - midpoint))
+    return best[2]
+
+
+def run_pipeline(
+    video_path: str,
+    progress_cb: ProgressCallback | None = None,
+    target_jersey_number: str | None = None,
+) -> AnalysisResult:
     def report(fraction: float) -> None:
         if progress_cb:
             progress_cb(min(1.0, max(0.0, fraction)))
@@ -182,8 +213,32 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
     jersey_votes = JerseyNumberAggregator()
     jersey_ocr_stride = max(1, len(frames) // settings.JERSEY_OCR_MAX_SAMPLES)
 
-    frame_signals: list[FrameSignals] = []
     previous_center: tuple[float, float] | None = None
+    player_match_found: bool | None = None
+    loop_start_fraction = 0.05
+    if target_jersey_number:
+        player_match_found = False
+        identifier = PlayerIdentifier(target_jersey_number)
+        id_frame_count = min(len(frames), settings.PLAYER_ID_MAX_FRAMES)
+        for frame in frames[:id_frame_count]:
+            _, id_people = detection_model.detect_ball_and_players(frame.image)
+            identifier.observe(
+                id_people, lambda box, f=frame: jersey_reader.read_crop(f.image, box)
+            )
+        seed_box = identifier.best_match_box()
+        if seed_box is not None:
+            previous_center = bbox_center(seed_box)
+            player_match_found = True
+        logger.info(
+            "Player identification: target=%r matched=%s (%s)",
+            target_jersey_number,
+            player_match_found,
+            identifier.debug_summary(),
+        )
+        loop_start_fraction = 0.15
+        report(loop_start_fraction)
+
+    frame_signals: list[FrameSignals] = []
     hand_debug_stats = {
         "frames_with_player": 0,
         "frames_with_pose": 0,
@@ -220,7 +275,7 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
                 frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance
             )
         )
-        report(0.05 + 0.55 * (i + 1) / len(frames))
+        report(loop_start_fraction + (0.6 - loop_start_fraction) * (i + 1) / len(frames))
 
     logger.info(
         "Dribbling-hand debug: %d frames total, %s, votes=%s",
@@ -233,25 +288,38 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
     logger.info("Jersey OCR result: guess=%r (%s)", player_number, jersey_votes.debug_summary())
 
     action_classifier = get_action_classifier()
-    window_size = settings.ACTION_WINDOW_FRAMES
-    stride = settings.ACTION_WINDOW_STRIDE
+    kinetics_window_size = settings.ACTION_WINDOW_FRAMES
+    kinetics_stride = settings.ACTION_WINDOW_STRIDE
 
+    kinetics_windows: list[tuple[float, float, list[tuple[str, float]]]] = []
+    kinetics_starts = list(range(0, max(1, len(frames) - 1), kinetics_stride)) or [0]
+    for wi, start_idx in enumerate(kinetics_starts):
+        end_idx = min(len(frames), start_idx + kinetics_window_size)
+        if end_idx - start_idx < 2:
+            continue
+        window_frames = frames[start_idx:end_idx]
+        prediction = action_classifier.classify_window([f.image for f in window_frames])
+        kinetics_windows.append(
+            (window_frames[0].timestamp, window_frames[-1].timestamp, prediction.top_labels)
+        )
+        report(0.6 + 0.25 * (wi + 1) / len(kinetics_starts))
+
+    fusion_window_frames = max(3, round(settings.FUSION_WINDOW_SECONDS * settings.ANALYSIS_FPS))
     scored_windows = []
-    window_starts = list(range(0, max(1, len(frames) - 1), stride)) or [0]
-    for wi, start_idx in enumerate(window_starts):
-        end_idx = min(len(frames), start_idx + window_size)
+    fusion_starts = list(range(0, len(frames), fusion_window_frames)) or [0]
+    for fi, start_idx in enumerate(fusion_starts):
+        end_idx = min(len(frames), start_idx + fusion_window_frames)
         if end_idx - start_idx < 2:
             continue
         window_frames = frames[start_idx:end_idx]
         window_frame_signals = frame_signals[start_idx:end_idx]
-
-        prediction = action_classifier.classify_window([f.image for f in window_frames])
+        midpoint = (window_frames[0].timestamp + window_frames[-1].timestamp) / 2
 
         window = WindowSignals(
             start_time=window_frames[0].timestamp,
             end_time=window_frames[-1].timestamp,
             frames=window_frame_signals,
-            kinetics_top_labels=prediction.top_labels,
+            kinetics_top_labels=_nearest_kinetics_labels(kinetics_windows, midpoint),
         )
         scored = score_window(window)
         scored_windows.append((window, scored))
@@ -263,7 +331,7 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
             scored.confidence,
             scored.evidence,
         )
-        report(0.6 + 0.4 * (wi + 1) / len(window_starts))
+        report(0.85 + 0.15 * (fi + 1) / len(fusion_starts))
 
     segments = merge_adjacent_segments(scored_windows)
     logger.info(
@@ -280,11 +348,23 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
 
     report(1.0)
 
+    # If we confidently identified the requested player before tracking
+    # began, that's a more authoritative number for the narrative subject
+    # than the passive OCR aggregate (which keeps sampling the whole clip
+    # regardless and could disagree or come back empty) - otherwise fall
+    # back to that aggregate, same as when no number was requested at all.
+    narrative_player_number = target_jersey_number if player_match_found else player_number
+
     return AnalysisResult(
         duration_seconds=duration,
         fps_analyzed=settings.ANALYSIS_FPS,
         segments=segments,
         summary=summary,
-        narrative=narrate(segments, summary, player_number=player_number),
+        narrative=narrate(segments, summary, player_number=narrative_player_number),
         detected_player_number=player_number,
+        requested_player_number=target_jersey_number,
+        player_match_found=player_match_found,
+        player_identification_note=player_identification_note(
+            target_jersey_number, player_match_found
+        ),
     )

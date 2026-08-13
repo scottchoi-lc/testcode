@@ -28,14 +28,21 @@ backend/    FastAPI service: runs the Hugging Face models and the
 
 There isn't an off-the-shelf Hugging Face model that classifies exactly
 "dribbling vs. shooting vs. passing vs. moving without the ball" for
-basketball, so the backend combines three general-purpose HF models
-(object detection, pose estimation, Kinetics action classification) with a
+basketball, so the backend combines four general-purpose HF models (object
+detection, pose estimation, Kinetics action classification, OCR) with a
 small, unit-tested rule-based fusion layer specific to this task. See
 [`backend/README.md`](backend/README.md) for the full breakdown of models
 used, and [`backend/app/pipeline/fusion.py`](backend/app/pipeline/fusion.py)
 for the fusion heuristics themselves — that file is the place to improve
 accuracy for a specific dataset/camera setup, or eventually replace with a
 fine-tuned classifier trained on labeled basketball clips.
+
+Results also include a plain-English play-by-play narrative
+(`app/pipeline/narration.py`) that calls out which hand a player is
+dribbling with when detectable, and there's an optional way to focus
+analysis on one player by jersey number
+(`app/pipeline/identification.py`) — see `backend/README.md` for how each
+works.
 
 ## Quickstart
 

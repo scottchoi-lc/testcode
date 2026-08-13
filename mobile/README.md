@@ -30,11 +30,15 @@ device via Expo Go, since the phone can't resolve the dev machine's
 - `App.tsx` — top-level screen state machine (home → analyzing → results). No
   navigation library is used since the flow is strictly linear.
 - `src/screens/HomeScreen.tsx` — record via camera or pick a video from the
-  library (`expo-image-picker`).
-- `src/screens/AnalyzeScreen.tsx` — uploads the video (`src/api/client.ts`)
-  and polls `/jobs/{id}` for progress until the analysis finishes.
-- `src/screens/ResultsScreen.tsx` — video playback (`expo-av`) plus the
-  action timeline and per-action breakdown.
+  library (`expo-image-picker`), with an optional jersey number field to
+  focus analysis on a specific player.
+- `src/screens/AnalyzeScreen.tsx` — uploads the video + jersey number
+  (`src/api/client.ts`) and polls `/jobs/{id}` for progress until the
+  analysis finishes.
+- `src/screens/ResultsScreen.tsx` — video playback (`expo-av`), a warning
+  banner if a requested jersey number couldn't be confidently matched
+  (`result.player_identification_note`), plus the action timeline and
+  per-action breakdown.
 - `src/components/ActionTimeline.tsx` / `SummaryBreakdown.tsx` — presentation
   components shared by the results screen.
 - `src/types.ts` — mirrors `backend/app/schemas.py`; keep in sync if the API

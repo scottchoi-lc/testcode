@@ -55,6 +55,22 @@ class AnalysisResult(BaseModel):
             "None means no confident reading - the narrative falls back to generic wording."
         ),
     )
+    requested_player_number: Optional[str] = Field(
+        None, description="Jersey number the caller asked to focus on, if any (POST /analyze field)."
+    )
+    player_match_found: Optional[bool] = Field(
+        None,
+        description=(
+            "None if no player was requested. True if requested_player_number was confidently "
+            "matched to a specific player before tracking began, and the rest of this result "
+            "reflects that player. False if requested but not found - the tracked player is "
+            "whoever the default heuristic picked instead; see player_identification_note."
+        ),
+    )
+    player_identification_note: Optional[str] = Field(
+        None,
+        description="User-facing caveat when player_match_found is False. None otherwise.",
+    )
 
 
 class JobResponse(BaseModel):

@@ -23,6 +23,12 @@ export function ResultsScreen({ videoUri, result, onReset }: Props) {
         isLooping
       />
 
+      {!!result.player_identification_note && (
+        <View style={styles.warningBox}>
+          <Text style={styles.warningText}>⚠️ {result.player_identification_note}</Text>
+        </View>
+      )}
+
       {!!result.narrative && (
         <View style={styles.narrativeBox}>
           <Text style={styles.narrativeText}>{result.narrative}</Text>
@@ -71,6 +77,19 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#000",
     marginBottom: 20,
+  },
+  warningBox: {
+    backgroundColor: "#2A1B0E",
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#92400E",
+    marginBottom: 12,
+  },
+  warningText: {
+    color: "#FCD34D",
+    fontSize: 13,
+    lineHeight: 18,
   },
   narrativeBox: {
     backgroundColor: "#111827",

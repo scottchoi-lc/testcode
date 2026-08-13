@@ -26,8 +26,22 @@ class Settings:
     ANALYSIS_FPS: float = float(os.getenv("ANALYSIS_FPS", "6"))
 
     # Sliding window (in analyzed frames) fed to the VideoMAE action classifier.
+    # This stays relatively coarse/expensive (~2.5s span per inference call on
+    # CPU) - narrative granularity comes from FUSION_WINDOW_SECONDS below, not
+    # from running this more often.
     ACTION_WINDOW_FRAMES: int = int(os.getenv("ACTION_WINDOW_FRAMES", "16"))
     ACTION_WINDOW_STRIDE: int = int(os.getenv("ACTION_WINDOW_STRIDE", "8"))
+
+    # Window size (in seconds) for the rule-based fusion scoring in
+    # fusion.py - deliberately decoupled from ACTION_WINDOW_FRAMES/STRIDE
+    # above. The rule-based scoring only needs already-computed per-frame
+    # ball/pose signals (cheap), unlike the VideoMAE classifier (expensive
+    # CPU inference), so it can run at a much finer grain without added
+    # model cost - each fusion window just borrows the kinetics label from
+    # whichever VideoMAE window is temporally closest. Finer windows mean
+    # merge_adjacent_segments produces more, shorter segments instead of
+    # smoothing quick individual actions into one long block.
+    FUSION_WINDOW_SECONDS: float = float(os.getenv("FUSION_WINDOW_SECONDS", "0.8"))
 
     # Detection confidence thresholds. Ball is lower than person because a
     # basketball is small, fast-moving, and often motion-blurred - the
@@ -44,6 +58,13 @@ class Settings:
     # results are majority-voted, so more than ~20 samples adds runtime
     # without meaningfully improving the vote.
     JERSEY_OCR_MAX_SAMPLES: int = int(os.getenv("JERSEY_OCR_MAX_SAMPLES", "20"))
+
+    # When a target jersey number is requested, scan up to this many of the
+    # earliest sampled frames - OCR-ing every detected person in each, not
+    # just one - to find which tracked person matches before main tracking
+    # begins. Kept small since this runs an extra detection + OCR pass per
+    # person per frame on top of the normal per-clip cost.
+    PLAYER_ID_MAX_FRAMES: int = int(os.getenv("PLAYER_ID_MAX_FRAMES", "10"))
 
     # Storage.
     UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", "/tmp/basketball_analyzer/uploads"))

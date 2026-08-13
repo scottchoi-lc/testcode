@@ -57,6 +57,34 @@ camera angle, curved fabric) — expect `detected_player_number` to often be
 `null` rather than a wrong guess, by design (see `JerseyNumberAggregator`'s
 voting thresholds).
 
+### Narrative granularity
+
+The rule-based scoring in `fusion.py` runs on much finer windows
+(`FUSION_WINDOW_SECONDS`, default 0.8s) than the VideoMAE classifier
+(`ACTION_WINDOW_FRAMES`/`ACTION_WINDOW_STRIDE`, ~2.5s per inference call).
+These are deliberately decoupled: the fine windows only need already-cheap
+per-frame ball/pose signals, so `pipeline.py` runs the expensive VideoMAE
+inference at its normal (coarser) cadence and has each fine window borrow
+the kinetics label from whichever coarse window is temporally closest
+(`_nearest_kinetics_labels`). This is what lets quick individual events show
+up as their own segments instead of getting smoothed into one long block —
+without adding more model inference calls.
+
+### Focusing on a specific player
+
+`POST /analyze` accepts an optional `jersey_number` form field (1-2 digits).
+When set, `app/pipeline/identification.py`'s `PlayerIdentifier` scans the
+first `PLAYER_ID_MAX_FRAMES` sampled frames — OCR-ing *every* detected
+person in each, not just one — and clusters matching detections across
+frames by proximity to find whichever person is consistently read as that
+number. If found, that person's last-seen position seeds the main tracker
+(the same nearest-neighbor continuity `_pick_primary_player` already does
+frame-to-frame) instead of the default "largest person in frame 0"
+heuristic. If not confidently found, analysis proceeds on whichever player
+the default heuristic picks, and `AnalysisResult.player_identification_note`
+carries a user-facing caveat (`player_match_found` is `false`) rather than
+silently analyzing a possibly-wrong player.
+
 ## Running locally
 
 ```bash
@@ -74,7 +102,9 @@ beyond short clips.
 ## API
 
 - `POST /analyze` — multipart upload with a `video` field (any format
-  OpenCV/ffmpeg can decode). Returns `{ job_id, status }` immediately;
+  OpenCV/ffmpeg can decode) and an optional `jersey_number` field (1-2
+  digits) to focus analysis on a specific player — see "Focusing on a
+  specific player" above. Returns `{ job_id, status }` immediately;
   analysis runs in the background.
 - `GET /jobs/{job_id}` — poll for `{ status, progress, result, error }`.
   `status` is one of `queued | processing | done | failed`. `result` is

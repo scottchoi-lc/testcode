@@ -5,7 +5,11 @@ import type { JobResponse } from "@/types";
 
 const client = axios.create({ baseURL: API_BASE_URL, timeout: 60_000 });
 
-export async function submitVideoForAnalysis(videoUri: string, fileName: string): Promise<JobResponse> {
+export async function submitVideoForAnalysis(
+  videoUri: string,
+  fileName: string,
+  jerseyNumber?: string
+): Promise<JobResponse> {
   const form = new FormData();
   // React Native's FormData accepts this { uri, name, type } shape for files.
   form.append("video", {
@@ -13,6 +17,9 @@ export async function submitVideoForAnalysis(videoUri: string, fileName: string)
     name: fileName,
     type: "video/mp4",
   } as unknown as Blob);
+  if (jerseyNumber) {
+    form.append("jersey_number", jerseyNumber);
+  }
 
   const response = await client.post<JobResponse>("/analyze", form, {
     headers: { "Content-Type": "multipart/form-data" },

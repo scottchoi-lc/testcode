@@ -29,7 +29,7 @@ export function AnalyzeScreen({ video, onComplete, onError, onCancel }: Props) {
 
     (async () => {
       try {
-        const job = await submitVideoForAnalysis(video.uri, video.fileName);
+        const job = await submitVideoForAnalysis(video.uri, video.fileName, video.jerseyNumber);
         setStatus(job.status);
 
         const finalJob = await pollJobUntilDone(

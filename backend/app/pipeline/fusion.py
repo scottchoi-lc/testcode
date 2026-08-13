@@ -37,8 +37,16 @@ KINETICS_GENERIC_BASKETBALL_LABELS = {
 BALL_POSSESSION_MAX_DIST = 0.9
 BALL_RELEASE_MIN_DIST = 1.6
 DRIBBLE_VERTICAL_STD_MAX = 0.35
-PLAYER_MOVE_MIN_DISPLACEMENT = 0.5
 WRIST_ABOVE_SHOULDER_MARGIN = 0.02
+
+# Player displacement needed to call a window "moving", expressed as a rate
+# (player-bbox-diagonals per second) rather than a flat per-window amount,
+# since analysis window duration is a tunable (FUSION_WINDOW_SECONDS) and a
+# flat threshold would silently need re-tuning any time that changes. 0.2/s
+# reproduces the same idle-vs-moving calls a flat 0.5-per-~2.5s threshold
+# made on real logged windows (e.g. 0.34/2.5s=0.14/s stayed idle, 0.53/2.5s
+# =0.21/s was moving), so it's a like-for-like conversion, not a new guess.
+PLAYER_MOVE_MIN_DISPLACEMENT_RATE = 0.2
 
 # Minimum fraction of ball-detected frames within a window that must read as
 # "possessed" (<= BALL_POSSESSION_MAX_DIST) to call it dribbling. Lower than
@@ -131,6 +139,8 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     if len(player_centers) >= 2:
         (x0, y0), (x1, y1) = player_centers[0], player_centers[-1]
         player_displacement = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    window_duration = frames[-1].timestamp - frames[0].timestamp
+    player_displacement_rate = player_displacement / window_duration if window_duration > 0 else 0.0
 
     kinetics_labels = window.kinetics_top_labels
     dribble_boost = _kinetics_boost(KINETICS_DRIBBLE_LABELS, kinetics_labels)
@@ -204,8 +214,8 @@ def score_window(window: WindowSignals) -> ScoredLabel:
 
     # --- Moving without the ball: the player is not in possession for
     # (almost) the whole window, yet is clearly displacing on the court. ---
-    if fraction_possessed <= 0.15 and player_displacement >= PLAYER_MOVE_MIN_DISPLACEMENT:
-        confidence = min(1.0, 0.4 + 0.4 * min(1.0, player_displacement))
+    if fraction_possessed <= 0.15 and player_displacement_rate >= PLAYER_MOVE_MIN_DISPLACEMENT_RATE:
+        confidence = min(1.0, 0.4 + 0.4 * min(1.0, player_displacement_rate))
         candidates.append(
             ScoredLabel(
                 ActionLabel.MOVING_WITHOUT_BALL,
@@ -213,6 +223,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                 {
                     "fraction_possessed": fraction_possessed,
                     "player_displacement": player_displacement,
+                    "player_displacement_rate": player_displacement_rate,
                 },
             )
         )

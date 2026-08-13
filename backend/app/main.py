@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -31,14 +32,30 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-def _process_job(job_id: str, video_path: str) -> None:
+_JERSEY_NUMBER_RE = re.compile(r"^\d{1,2}$")
+
+
+def _normalize_jersey_number(raw: str | None) -> str | None:
+    """Digits only, 1-2 characters, matching what jersey OCR ever produces
+    (see app/models/jersey_ocr.py's _DIGIT_RE). Anything else - empty,
+    letters, too long - is treated as "no number requested" rather than
+    rejecting the upload over a cosmetic input mistake."""
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    return stripped if _JERSEY_NUMBER_RE.match(stripped) else None
+
+
+def _process_job(job_id: str, video_path: str, target_jersey_number: str | None) -> None:
     job_store.update(job_id, status=JobStatus.PROCESSING, progress=0.0)
 
     def on_progress(fraction: float) -> None:
         job_store.update(job_id, progress=fraction)
 
     try:
-        result = run_pipeline(video_path, progress_cb=on_progress)
+        result = run_pipeline(
+            video_path, progress_cb=on_progress, target_jersey_number=target_jersey_number
+        )
         job_store.update(job_id, status=JobStatus.DONE, progress=1.0, result=result)
     except Exception as exc:  # noqa: BLE001 - surfaced to the client via job status
         logger.exception("Analysis failed for job %s", job_id)
@@ -48,7 +65,11 @@ def _process_job(job_id: str, video_path: str) -> None:
 
 
 @app.post("/analyze", response_model=JobResponse)
-async def analyze(video: UploadFile, background_tasks: BackgroundTasks) -> JobResponse:
+async def analyze(
+    video: UploadFile,
+    background_tasks: BackgroundTasks,
+    jersey_number: str | None = Form(None),
+) -> JobResponse:
     if video.content_type is None or not video.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a video")
 
@@ -65,8 +86,9 @@ async def analyze(video: UploadFile, background_tasks: BackgroundTasks) -> JobRe
                 raise HTTPException(status_code=413, detail="Video exceeds maximum upload size")
             dest.write(chunk)
 
+    target_jersey_number = _normalize_jersey_number(jersey_number)
     job = job_store.create(video_path=str(dest_path))
-    background_tasks.add_task(_process_job, job.job_id, str(dest_path))
+    background_tasks.add_task(_process_job, job.job_id, str(dest_path), target_jersey_number)
     return JobResponse(job_id=job.job_id, status=job.status, progress=job.progress)
 
 
