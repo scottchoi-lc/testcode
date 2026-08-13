@@ -16,8 +16,37 @@ class Settings:
     # If that's a problem, yolos-tiny is still a drop-in via this env var.
     DETECTION_MODEL: str = os.getenv("DETECTION_MODEL", "hustvl/yolos-small")
     POSE_MODEL: str = os.getenv("POSE_MODEL", "usyd-community/vitpose-base-simple")
-    ACTION_MODEL: str = os.getenv("ACTION_MODEL", "MCG-NJU/videomae-base-finetuned-kinetics")
+    # microsoft/xclip-base-patch32, not MCG-NJU/videomae-base-finetuned-kinetics
+    # (swapped out): the VideoMAE-Kinetics checkpoint is CC-BY-NC-4.0, which
+    # blocks commercial use of the model *and* anything fine-tuned from it -
+    # a real problem if this app is ever meant to be a commercial product.
+    # X-CLIP is MIT licensed. It's also a better fit for this task on the
+    # merits, not just the license: VideoMAE's fixed Kinetics-400 head has no
+    # "passing basketball" class at all (a real, longstanding gap - see
+    # fusion.py's history), whereas X-CLIP does zero-shot video-text
+    # similarity against whatever candidate phrases we supply
+    # (ACTION_CANDIDATE_LABELS below), so we can name the exact concept we
+    # want scored, including a real passing candidate.
+    ACTION_MODEL: str = os.getenv("ACTION_MODEL", "microsoft/xclip-base-patch32")
     JERSEY_OCR_MODEL: str = os.getenv("JERSEY_OCR_MODEL", "microsoft/trocr-base-printed")
+
+    # Candidate phrases scored per fusion window via X-CLIP's zero-shot
+    # video-text similarity (softmax over just these candidates, not a fixed
+    # 400-way head) - app/pipeline/fusion.py's KINETICS_*_LABELS constants
+    # must reference these exact strings to match on them. Includes a
+    # generic/ambiguous catch-all ("playing basketball", mirroring the old
+    # Kinetics-400 signal of the same name) and an explicit negative anchor
+    # (unrelated activity) so the softmax has somewhere for probability mass
+    # to go on a clip that doesn't clearly match any specific action, rather
+    # than being forced to spread only across basketball-specific phrases.
+    ACTION_CANDIDATE_LABELS: list[str] = [
+        "dribbling a basketball",
+        "shooting a basketball",
+        "passing a basketball to a teammate",
+        "a basketball player moving without the ball",
+        "playing basketball",
+        "a person doing an activity unrelated to basketball",
+    ]
 
     # Torch device: "cuda", "mps", or "cpu". Auto-detected at runtime if left as "auto".
     DEVICE: str = os.getenv("DEVICE", "auto")
@@ -25,20 +54,24 @@ class Settings:
     # Frame sampling rate used for detection/pose (frames per second).
     ANALYSIS_FPS: float = float(os.getenv("ANALYSIS_FPS", "6"))
 
-    # Sliding window (in analyzed frames) fed to the VideoMAE action classifier.
-    # This stays relatively coarse/expensive (~2.5s span per inference call on
-    # CPU) - narrative granularity comes from FUSION_WINDOW_SECONDS below, not
-    # from running this more often.
+    # Sliding window (in analyzed frames) fed to the action classifier
+    # (X-CLIP - see ACTION_MODEL above). This stays relatively coarse/
+    # expensive per inference call on CPU - narrative granularity comes from
+    # FUSION_WINDOW_SECONDS below, not from running this more often. X-CLIP's
+    # own num_frames (8 by default) can differ from this; ActionClassifier
+    # resamples whatever's collected here down/up to match, so this setting
+    # mainly controls collection/coarse-window granularity, not the exact
+    # frame count the model sees.
     ACTION_WINDOW_FRAMES: int = int(os.getenv("ACTION_WINDOW_FRAMES", "16"))
     ACTION_WINDOW_STRIDE: int = int(os.getenv("ACTION_WINDOW_STRIDE", "8"))
 
     # Window size (in seconds) for the rule-based fusion scoring in
     # fusion.py - deliberately decoupled from ACTION_WINDOW_FRAMES/STRIDE
     # above. The rule-based scoring only needs already-computed per-frame
-    # ball/pose signals (cheap), unlike the VideoMAE classifier (expensive
-    # CPU inference), so it can run at a much finer grain without added
-    # model cost - each fusion window just borrows the kinetics label from
-    # whichever VideoMAE window is temporally closest. Finer windows mean
+    # ball/pose signals (cheap), unlike the action classifier (expensive CPU
+    # inference), so it can run at a much finer grain without added model
+    # cost - each fusion window just borrows the label scores from whichever
+    # coarse classifier window is temporally closest. Finer windows mean
     # merge_adjacent_segments produces more, shorter segments instead of
     # smoothing quick individual actions into one long block.
     FUSION_WINDOW_SECONDS: float = float(os.getenv("FUSION_WINDOW_SECONDS", "0.8"))

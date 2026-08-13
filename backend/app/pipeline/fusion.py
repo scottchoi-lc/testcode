@@ -6,11 +6,23 @@ domain-specific glue: it combines
 
   * ball <-> player proximity and ball trajectory (from `DetectionModel`)
   * wrist/shoulder motion (from `PoseModel`, optional)
-  * a coarse activity label from `ActionClassifier` (VideoMAE / Kinetics)
+  * a coarse activity label from `ActionClassifier` (X-CLIP zero-shot
+    video-text similarity against `settings.ACTION_CANDIDATE_LABELS`)
 
 into one label per analysis window. Everything here is plain, deterministic
 Python over small numeric structures - no ML inference happens in this
 module - which keeps it fast to unit test without downloading any models.
+
+Naming note: identifiers/dict keys below still say "kinetics" (e.g.
+`kinetics_top_labels`, `kinetics_dribble_score`) - a holdover from when
+`ActionClassifier` was a VideoMAE model fine-tuned on Kinetics-400, fixed to
+its 400 classes. It's since been swapped for X-CLIP (see
+`app/models/action_classifier.py` for why - license, and a real "passing"
+signal Kinetics-400 never had), which scores whatever candidate phrases we
+supply rather than a fixed vocabulary. The KINETICS_*_LABELS sets below now
+reference those candidate phrases (`ACTION_CANDIDATE_LABELS` in
+`config.py`), not Kinetics-400 class names - the two constants must stay in
+sync since matching is by exact string.
 """
 from __future__ import annotations
 
@@ -20,16 +32,18 @@ from dataclasses import dataclass, field
 
 from app.schemas import ActionLabel
 
-# Kinetics-400 label -> which of our buckets it supports, and how much it
-# should nudge the heuristic score when present in the classifier's top-k.
-KINETICS_DRIBBLE_LABELS = {"dribbling basketball"}
-KINETICS_SHOOT_LABELS = {"shooting basketball", "dunking basketball", "shooting goal (soccer)"}
+# Must exactly match strings in `settings.ACTION_CANDIDATE_LABELS`
+# (config.py) - these are the phrases we ask the action classifier to score,
+# grouped by which of our buckets each supports.
+KINETICS_DRIBBLE_LABELS = {"dribbling a basketball"}
+KINETICS_SHOOT_LABELS = {"shooting a basketball"}
+KINETICS_PASS_LABELS = {"passing a basketball to a teammate"}
 KINETICS_GENERIC_BASKETBALL_LABELS = {
-    "dribbling basketball",
-    "shooting basketball",
-    "dunking basketball",
+    "dribbling a basketball",
+    "shooting a basketball",
+    "passing a basketball to a teammate",
+    "a basketball player moving without the ball",
     "playing basketball",
-    "playing kickball",
 }
 
 # Tunable thresholds for the heuristics below. Distances are normalized by
@@ -59,17 +73,27 @@ PLAYER_MOVE_MIN_DISPLACEMENT_RATE = 0.2
 # revisit if it starts producing false-positive dribbling calls elsewhere.
 DRIBBLE_POSSESSION_MIN_FRACTION = 0.3
 
-# Minimum Kinetics softmax score for "dribbling basketball"/"shooting
-# basketball" to count as corroborating evidence that can substitute for a
-# missing direct-signal check (vertical std / wrist height / release). A
-# bare `> 0` here is a bug, not a threshold: VideoMAE's softmax spreads a
-# little probability mass over most of its 400 classes, so an unrelated
-# window can show e.g. kinetics_shoot_score=0.088 with zero real shooting
-# evidence (fraction_wrist_high=0.0, ball_released=False) and still get
-# labeled SHOOTING purely from that noise floor - this was caught from a
-# real clip's logs where exactly that happened. 0.3 matches the existing
-# fraction_wrist_high >= 0.3 bar so a Kinetics-only override needs to be as
-# convincing as the direct-evidence threshold it's standing in for.
+# Minimum classifier score for a candidate label ("dribbling a basketball",
+# "shooting a basketball", "passing a basketball to a teammate") to count as
+# corroborating evidence that can substitute for a missing direct-signal
+# check (vertical std / wrist height / release). A bare `> 0` here is a bug,
+# not a threshold: with VideoMAE-Kinetics (the model this was originally
+# tuned against), softmax spread a little probability mass over most of its
+# 400 classes, so an unrelated window could show e.g. kinetics_shoot_score=
+# 0.088 with zero real shooting evidence (fraction_wrist_high=0.0,
+# ball_released=False) and still get labeled SHOOTING purely from that noise
+# floor - caught from a real clip's logs where exactly that happened. 0.3
+# matched the existing fraction_wrist_high >= 0.3 bar at the time.
+#
+# UNVERIFIED against the current model: ActionClassifier now uses X-CLIP
+# zero-shot similarity over `settings.ACTION_CANDIDATE_LABELS` (6 candidates
+# by default), not a 400-way Kinetics softmax - see
+# app/models/action_classifier.py's docstring. Chance-level baseline for a
+# handful of candidates (~1/6 ~= 0.17) is far higher than Kinetics-400's
+# (~1/400 ~= 0.0025), so 0.3 may no longer sit meaningfully above the noise
+# floor the way it did before. Left unchanged pending a real clip's logged
+# kinetics_*_score values under the new model - re-tune from that evidence,
+# not by guessing, the same way this constant was derived originally.
 KINETICS_OVERRIDE_MIN = 0.3
 
 
@@ -169,6 +193,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     kinetics_labels = window.kinetics_top_labels
     dribble_boost = _kinetics_boost(KINETICS_DRIBBLE_LABELS, kinetics_labels)
     shoot_boost = _kinetics_boost(KINETICS_SHOOT_LABELS, kinetics_labels)
+    pass_boost = _kinetics_boost(KINETICS_PASS_LABELS, kinetics_labels)
     generic_basketball = _has_generic_basketball_signal(kinetics_labels)
 
     candidates: list[ScoredLabel] = []
@@ -222,9 +247,11 @@ def score_window(window: WindowSignals) -> ScoredLabel:
             )
 
     # --- Passing: player starts with the ball, it leaves possession quickly
-    # (released) but *without* the wrist-above-shoulder shooting motion and
-    # without a strong shooting signal from the action classifier. Ball
-    # travels laterally more than vertically.
+    # (released, directly or corroborated by a strong "passing" classifier
+    # score - the same X-CLIP corroboration pattern used for dribbling/
+    # shooting above) but *without* the wrist-above-shoulder shooting motion
+    # and without a strong shooting signal. Ball travels laterally more than
+    # vertically.
     #
     # A crossover/hesitation dribble matches this same signature - lateral
     # ball swing, no wrist raise - since the ball moving wide of the
@@ -233,19 +260,24 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # what actually tells the two apart: a real pass to a teammate doesn't
     # come back into the passer's hands a fraction of a second later, but a
     # crossover's ball does (real clip: passer's ball read as released by
-    # t=1.0, then fraction_possessed=0.6 again in the very next window). ---
+    # t=1.0, then fraction_possessed=0.6 again in the very next window).
+    # That's a physical fact about what happened, not something a
+    # classifier's confidence should be able to override - so it's checked
+    # unconditionally here, not folded into the corroboration OR below. ---
     if distances and distances[0] <= BALL_POSSESSION_MAX_DIST and len(distances) > 1:
         released = distances[-1] >= BALL_RELEASE_MIN_DIST
         lateral_move = abs(ball_xs[-1] - ball_xs[0]) if len(ball_xs) > 1 else 0.0
         vertical_move = abs(ball_ys[-1] - ball_ys[0]) if len(ball_ys) > 1 else 0.0
         looks_like_pass = (
-            released
+            (released or pass_boost >= KINETICS_OVERRIDE_MIN)
             and fraction_wrist_high < 0.3
             and shoot_boost < 0.15
             and not window.ball_returns_to_possession_soon
         )
         if looks_like_pass and lateral_move >= vertical_move:
-            confidence = min(1.0, 0.5 + 0.3 * min(1.0, lateral_move) - 0.2 * shoot_boost)
+            confidence = min(
+                1.0, 0.5 + 0.3 * min(1.0, lateral_move) + 0.2 * pass_boost - 0.2 * shoot_boost
+            )
             candidates.append(
                 ScoredLabel(
                     ActionLabel.PASSING,
@@ -254,6 +286,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "lateral_move": lateral_move,
                         "vertical_move": vertical_move,
                         "fraction_wrist_high": fraction_wrist_high,
+                        "kinetics_pass_score": pass_boost,
                         "ball_distances": [round(d, 2) for d in distances],
                     },
                 )

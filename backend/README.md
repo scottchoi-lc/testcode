@@ -14,14 +14,14 @@ models with a small rule-based fusion layer:
 |---|---|---|
 | Detection | [`hustvl/yolos-small`](https://huggingface.co/hustvl/yolos-small) | Finds the ball ("sports ball") and players ("person") in each sampled frame (COCO classes). Upgraded from `yolos-tiny`, which under-detected the ball on real footage (~40% of frames in one test clip) — `yolos-small` trades slower CPU inference for meaningfully better recall on a small, fast-moving object; `yolos-tiny` is a drop-in fallback via `DETECTION_MODEL` if that trade-off doesn't work for you. |
 | Pose | [`usyd-community/vitpose-base-simple`](https://huggingface.co/usyd-community/vitpose-base-simple) | Estimates the tracked player's keypoints (wrists, shoulders, ...) per frame. Optional — the pipeline degrades gracefully if it's unavailable. |
-| Action context | [`MCG-NJU/videomae-base-finetuned-kinetics`](https://huggingface.co/MCG-NJU/videomae-base-finetuned-kinetics) | Classifies short clip windows against Kinetics-400, which includes classes like "dribbling basketball" and "shooting basketball". |
+| Action context | [`microsoft/xclip-base-patch32`](https://huggingface.co/microsoft/xclip-base-patch32) | X-CLIP: scores short clip windows via zero-shot video-text similarity against `settings.ACTION_CANDIDATE_LABELS` (e.g. "dribbling a basketball", "passing a basketball to a teammate"). Swapped in for `MCG-NJU/videomae-base-finetuned-kinetics` — see "Why X-CLIP, not VideoMAE-Kinetics" below. |
 | Jersey number | [`microsoft/trocr-base-printed`](https://huggingface.co/microsoft/trocr-base-printed) | Best-effort OCR on the tracked player's torso, majority-voted across a sample of frames, to personalize the narrative ("Player #23 dribbled...") when a number is legible. Falls back to generic "the player" wording otherwise — see `app/models/jersey_ocr.py`. |
 
 `app/pipeline/fusion.py` combines ball-to-player distance/trajectory, wrist
-height relative to the shoulder, and the Kinetics label into one of the four
-target labels per analysis window (`app/pipeline/pipeline.py` orchestrates
-the whole thing). Adjacent windows with the same label are merged into
-segments with a `start_time`/`end_time`/`confidence`, and
+height relative to the shoulder, and the action-classifier label scores into
+one of the four target labels per analysis window (`app/pipeline/pipeline.py`
+orchestrates the whole thing). Adjacent windows with the same label are
+merged into segments with a `start_time`/`end_time`/`confidence`, and
 `app/pipeline/narration.py` turns the merged segments into a plain-English
 play-by-play (`AnalysisResult.narrative`).
 
@@ -57,18 +57,56 @@ camera angle, curved fabric) — expect `detected_player_number` to often be
 `null` rather than a wrong guess, by design (see `JerseyNumberAggregator`'s
 voting thresholds).
 
+### Why X-CLIP, not VideoMAE-Kinetics
+
+The action-context model was originally `MCG-NJU/videomae-base-finetuned-
+kinetics`, fine-tuned on Kinetics-400. Two problems with keeping it:
+
+1. **License.** VideoMAE-Kinetics is CC-BY-NC-4.0 — non-commercial only,
+   and that restriction extends to fine-tuned derivatives of it too, not
+   just the checkpoint as distributed. That's a real blocker if this app
+   is ever meant to be a commercial product.
+2. **Fit.** Kinetics-400's 400 classes don't include a "passing basketball"
+   concept at all, which is part of why `fusion.py`'s PASSING branch has
+   historically had to guess entirely from ball-trajectory heuristics
+   rather than any classifier corroboration (see its own history of
+   passing/crossover-dribble mixups).
+
+`microsoft/xclip-base-patch32` (X-CLIP, MIT licensed) fixes both: it's a
+CLIP-style model trained contrastively on (video, text) pairs, so instead of
+reading from a fixed classification head it scores zero-shot similarity
+against whatever candidate phrases we hand it
+(`settings.ACTION_CANDIDATE_LABELS`) — including a real
+`"passing a basketball to a teammate"` candidate, wired into `fusion.py`'s
+PASSING branch as `pass_boost` the same way `dribble_boost`/`shoot_boost`
+already corroborate their branches.
+
+One thing this swap leaves **unverified**: `KINETICS_OVERRIDE_MIN` (0.3,
+fusion.py) was tuned against Kinetics-400's ~400-way softmax, where an
+unrelated class sits near a ~0.0025 noise floor — so even a small nonzero
+score was already meaningfully above chance. X-CLIP's softmax here runs
+over only `len(ACTION_CANDIDATE_LABELS)` candidates (6 by default), so
+chance-level is much higher (~0.17), and 0.3 may no longer be a meaningful
+bar. This wasn't re-tuned blind — it needs a real clip's logged
+`kinetics_*_score` values under the new model first, the same evidence-
+driven approach every other threshold in this file has been tuned with.
+If dribbling/shooting/passing calls look too eager to trust weak classifier
+corroboration after this change, that constant is the first thing to
+re-check against fresh logs.
+
 ### Narrative granularity
 
 The rule-based scoring in `fusion.py` runs on much finer windows
-(`FUSION_WINDOW_SECONDS`, default 0.8s) than the VideoMAE classifier
+(`FUSION_WINDOW_SECONDS`, default 0.8s) than the coarse action classifier
 (`ACTION_WINDOW_FRAMES`/`ACTION_WINDOW_STRIDE`, ~2.5s per inference call).
 These are deliberately decoupled: the fine windows only need already-cheap
-per-frame ball/pose signals, so `pipeline.py` runs the expensive VideoMAE
+per-frame ball/pose signals, so `pipeline.py` runs the expensive classifier
 inference at its normal (coarser) cadence and has each fine window borrow
-the kinetics label from whichever coarse window is temporally closest
-(`_nearest_kinetics_labels`). This is what lets quick individual events show
-up as their own segments instead of getting smoothed into one long block —
-without adding more model inference calls.
+the label scores from whichever coarse window is temporally closest
+(`_nearest_kinetics_labels` — name is a holdover from the VideoMAE-Kinetics
+days, see "Why X-CLIP" above). This is what lets quick individual events
+show up as their own segments instead of getting smoothed into one long
+block — without adding more model inference calls.
 
 ### Focusing on a specific player
 
@@ -173,6 +211,13 @@ Kinetics-only override now has to be as convincing as the direct-evidence
 threshold it's standing in for, not merely nonzero. A *strong* Kinetics score
 can still corroborate a call the direct checks alone wouldn't quite make -
 the fix narrows the override, it doesn't remove it.
+
+(This section describes the bug and fix as diagnosed against the original
+VideoMAE-Kinetics model. The classifier has since been swapped to X-CLIP -
+see "Why X-CLIP, not VideoMAE-Kinetics" above - which changes the softmax's
+noise floor enough that `KINETICS_OVERRIDE_MIN`'s calibration is flagged as
+unverified there; the *shape* of this fix - a real threshold instead of a
+bare `> 0` - still holds regardless of which model produces the score.)
 
 ### Overlapping fusion windows (catching releases at a window boundary)
 
@@ -336,8 +381,28 @@ only required for real inference.)
 ## Improving accuracy
 
 The rule-based fusion layer is a reasonable starting point but is not a
-substitute for a model trained specifically on this task. The natural next
-step is to collect labeled basketball clips (per-frame or per-segment
-dribble/shoot/pass/move labels) and fine-tune the VideoMAE (or a similar
-video transformer) classification head directly on those four classes,
-replacing or augmenting `fusion.py`'s heuristics.
+substitute for a model trained specifically on this task - it improves by
+hand-deriving a new threshold or heuristic each time real footage exposes a
+gap, which doesn't scale to basketball's full variety of movement (see
+git history for several rounds of exactly this). Two paths forward, in
+order of effort:
+
+1. **Train a small classifier on the signals `fusion.py` already computes**
+   (`fraction_possessed`, wrist height, `kinetics_*_score`, ball trajectory,
+   `ball_returns_to_possession_soon`, ...) instead of hand-picked thresholds
+   over them. Needs comparatively little labeled data - a few dozen labeled
+   clips, segment-level ground truth mapped onto fusion windows - and no
+   GPU to train (e.g. scikit-learn logistic regression / gradient-boosted
+   trees). The lowest-effort real fix to the "every edge case needs a new
+   manual threshold" problem.
+2. **Fine-tune the action classifier itself** (X-CLIP, or a similar video
+   model - see "Why X-CLIP, not VideoMAE-Kinetics" above for why the base
+   model matters here) directly on labeled basketball footage. The
+   stronger long-term answer, but needs substantially more labeled data
+   (hundreds to thousands of clips) and training infrastructure than (1).
+
+Either way, keep the license of whatever base model gets fine-tuned in mind
+- a restrictively-licensed base (like the CC-BY-NC-4.0 VideoMAE-Kinetics
+checkpoint this project moved away from) constrains what you can do with
+the fine-tuned result too, regardless of how the fine-tuning data itself is
+licensed.

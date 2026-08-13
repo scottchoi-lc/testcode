@@ -20,13 +20,16 @@ Steps:
      frames so a few bad reads don't win) - purely for display in the
      narrative, unrelated to player selection.
   5. Slide a *coarse* window (ACTION_WINDOW_FRAMES/STRIDE) over the sampled
-     frames; run the HF video-classification model (VideoMAE/Kinetics) on
-     the raw frames in each - this is the expensive step, so it stays
-     relatively infrequent.
+     frames; run the HF video-text model (X-CLIP) on the raw frames in each,
+     scoring them against `settings.ACTION_CANDIDATE_LABELS` - this is the
+     expensive step, so it stays relatively infrequent. (Code/variable names
+     below still say "kinetics" - a holdover from when this was a
+     Kinetics-400 classifier; see `app/models/action_classifier.py` for why
+     that was swapped out and what "kinetics_top_labels" actually means now.)
   6. Slide a separate, much *finer* window (FUSION_WINDOW_SECONDS) over the
      same per-frame ball/pose signals - cheap, since no model inference is
      needed here - and fuse each one via `app.pipeline.fusion.score_window`,
-     borrowing whichever coarse window's kinetics label is temporally
+     borrowing whichever coarse window's label scores are temporally
      closest. This is what gives the narrative event-level granularity
      instead of one label per ~2.5s coarse window.
   7. Merge adjacent same-label fine windows into the final segment
@@ -303,9 +306,9 @@ def _bidirectional_frame_order(num_frames: int, seed_index: int) -> tuple[list[i
 def _nearest_kinetics_labels(
     kinetics_windows: list[tuple[float, float, list[tuple[str, float]]]], midpoint: float
 ) -> list[tuple[str, float]]:
-    """Pick the coarse VideoMAE window whose time span is temporally closest
+    """Pick the coarse X-CLIP window whose time span is temporally closest
     to a fine fusion window's midpoint, and return its top labels. Lets many
-    small fusion windows share one (expensive) kinetics inference call from
+    small fusion windows share one (expensive) classifier inference call from
     whichever coarse window covers roughly the same moment."""
     if not kinetics_windows:
         return []

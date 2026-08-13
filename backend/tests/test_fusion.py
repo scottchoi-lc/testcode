@@ -23,7 +23,7 @@ def test_dribbling_detected_from_ball_bounce_near_player():
         _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.7), dist=0.3, wrist_high=False),
         _frame(0.6, player=(0.5, 0.5), ball=(0.5, 0.9), dist=0.4, wrist_high=False),
     ]
-    window = WindowSignals(0.0, 0.6, frames, kinetics_top_labels=[("dribbling basketball", 0.8)])
+    window = WindowSignals(0.0, 0.6, frames, kinetics_top_labels=[("dribbling a basketball", 0.8)])
     result = score_window(window)
     assert result.label == ActionLabel.DRIBBLING
     assert result.confidence > 0.5
@@ -36,7 +36,7 @@ def test_shooting_detected_from_wrist_raise_and_release():
         _frame(0.4, player=(0.5, 0.5), ball=(0.55, 0.1), dist=1.8, wrist_high=True),
         _frame(0.6, player=(0.5, 0.5), ball=(0.6, 0.0), dist=2.0, wrist_high=True),
     ]
-    window = WindowSignals(0.0, 0.6, frames, kinetics_top_labels=[("shooting basketball", 0.7)])
+    window = WindowSignals(0.0, 0.6, frames, kinetics_top_labels=[("shooting a basketball", 0.7)])
     result = score_window(window)
     assert result.label == ActionLabel.SHOOTING
     assert result.confidence > 0.5
@@ -70,6 +70,57 @@ def test_crossover_dribble_not_mistaken_for_passing_when_ball_returns_soon():
     ]
     window = WindowSignals(
         0.0, 0.4, frames, kinetics_top_labels=[], ball_returns_to_possession_soon=True
+    )
+    result = score_window(window)
+    assert result.label != ActionLabel.PASSING
+
+
+def test_passing_corroborated_by_strong_kinetics_pass_score_without_clear_release():
+    # The ball only makes it to dist=1.0 (below BALL_RELEASE_MIN_DIST=1.6),
+    # so the direct "released" check alone wouldn't call this a pass - but a
+    # strong classifier score for "passing a basketball to a teammate"
+    # should be able to corroborate it, the same way dribble_boost/
+    # shoot_boost can corroborate their branches.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=1.0, wrist_high=False),
+    ]
+    window = WindowSignals(
+        0.0, 0.2, frames, kinetics_top_labels=[("passing a basketball to a teammate", 0.35)]
+    )
+    result = score_window(window)
+    assert result.label == ActionLabel.PASSING
+
+
+def test_passing_not_corroborated_by_weak_kinetics_pass_score():
+    # Same as above, but the score is below KINETICS_OVERRIDE_MIN - too weak
+    # to stand in for the missing direct release evidence.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=1.0, wrist_high=False),
+    ]
+    window = WindowSignals(
+        0.0, 0.2, frames, kinetics_top_labels=[("passing a basketball to a teammate", 0.1)]
+    )
+    result = score_window(window)
+    assert result.label != ActionLabel.PASSING
+
+
+def test_passing_kinetics_corroboration_still_vetoed_by_ball_returns_to_possession_soon():
+    # A strong "passing" classifier score doesn't get to override the
+    # physical fact that the ball came right back to the same player - that
+    # veto applies regardless of which path (direct release or kinetics
+    # corroboration) would otherwise have triggered PASSING.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=1.0, wrist_high=False),
+    ]
+    window = WindowSignals(
+        0.0,
+        0.2,
+        frames,
+        kinetics_top_labels=[("passing a basketball to a teammate", 0.35)],
+        ball_returns_to_possession_soon=True,
     )
     result = score_window(window)
     assert result.label != ActionLabel.PASSING
@@ -121,7 +172,7 @@ def test_shooting_not_triggered_by_weak_kinetics_noise_alone():
         _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.3, wrist_high=False),
         _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
     ]
-    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting basketball", 0.088)])
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting a basketball", 0.088)])
     result = score_window(window)
     assert result.label != ActionLabel.SHOOTING
     # The ball sitting still and close the whole window is a textbook (if
@@ -140,7 +191,7 @@ def test_dribbling_not_triggered_by_weak_kinetics_noise_alone():
         _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.9), dist=0.3),
         _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.1), dist=1.0),
     ]
-    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("dribbling basketball", 0.1)])
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("dribbling a basketball", 0.1)])
     result = score_window(window)
     assert result.label != ActionLabel.DRIBBLING
 
@@ -155,7 +206,7 @@ def test_shooting_still_detected_when_kinetics_score_clears_override_threshold()
         _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=0.5, wrist_high=True),
         _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.2), dist=0.6, wrist_high=True),
     ]
-    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting basketball", 0.6)])
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting a basketball", 0.6)])
     result = score_window(window)
     assert result.label == ActionLabel.SHOOTING
 

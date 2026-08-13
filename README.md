@@ -20,7 +20,7 @@ backend/    FastAPI service: runs the Hugging Face models and the
  │               │  poll /jobs/:id  │  1. sample frames                    │
  │               │◀──────────────── │  2. YOLOS: detect ball + players     │
  │  video player │   timeline JSON  │  3. ViTPose: player keypoints        │
- │  + timeline   │◀──────────────── │  4. VideoMAE: Kinetics action label  │
+ │  + timeline   │◀──────────────── │  4. X-CLIP: zero-shot action score   │
  └──────────────┘                   │  5. fusion.py: rule-based label per  │
                                      │     window -> merged segments        │
                                      └──────────────────────────────────────┘
@@ -29,8 +29,9 @@ backend/    FastAPI service: runs the Hugging Face models and the
 There isn't an off-the-shelf Hugging Face model that classifies exactly
 "dribbling vs. shooting vs. passing vs. moving without the ball" for
 basketball, so the backend combines four general-purpose HF models (object
-detection, pose estimation, Kinetics action classification, OCR) with a
-small, unit-tested rule-based fusion layer specific to this task. See
+detection, pose estimation, zero-shot video-text action scoring, OCR) with a
+small, unit-tested rule-based fusion layer specific to this task. All four
+are permissively licensed (Apache-2.0/MIT) — see
 [`backend/README.md`](backend/README.md) for the full breakdown of models
 used, and [`backend/app/pipeline/fusion.py`](backend/app/pipeline/fusion.py)
 for the fusion heuristics themselves — that file is the place to improve
