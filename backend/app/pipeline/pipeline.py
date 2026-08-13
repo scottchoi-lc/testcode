@@ -255,6 +255,14 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
         )
         scored = score_window(window)
         scored_windows.append((window, scored))
+        logger.info(
+            "Window %.1f-%.1f: label=%s conf=%.2f evidence=%s",
+            window.start_time,
+            window.end_time,
+            scored.label.value,
+            scored.confidence,
+            scored.evidence,
+        )
         report(0.6 + 0.4 * (wi + 1) / len(window_starts))
 
     segments = merge_adjacent_segments(scored_windows)
