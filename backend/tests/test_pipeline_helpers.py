@@ -6,6 +6,7 @@ from app.models.detection import Detection
 from app.pipeline.pipeline import (
     _bidirectional_frame_order,
     _color_histogram,
+    _fusion_window_bounds,
     _nearest_kinetics_labels,
     _pick_primary_player,
 )
@@ -46,6 +47,28 @@ def test_bidirectional_frame_order_seed_at_end():
     forward, backward = _bidirectional_frame_order(num_frames=5, seed_index=4)
     assert forward == [4]
     assert backward == [3, 2, 1, 0]
+
+
+def test_fusion_window_bounds_no_overlap_tiles_exactly():
+    # stride == window size reproduces the old non-overlapping tiling, so
+    # this also pins the pre-overlap behavior as a regression check.
+    assert _fusion_window_bounds(num_frames=10, window_frames=5, stride_frames=5) == [(0, 5), (5, 10)]
+
+
+def test_fusion_window_bounds_overlap_covers_every_boundary():
+    # stride < window size: every consecutive pair of frames must fall
+    # inside at least one common window, so a brief transition (e.g. a
+    # ball release) landing anywhere can't be split across a hard boundary
+    # the way it was with non-overlapping tiling.
+    bounds = _fusion_window_bounds(num_frames=10, window_frames=5, stride_frames=2)
+    assert bounds[0][0] == 0
+    assert bounds[-1][1] == 10
+    for i in range(9):
+        assert any(start <= i and i + 1 < end for start, end in bounds)
+
+
+def test_fusion_window_bounds_drops_windows_shorter_than_two_frames():
+    assert _fusion_window_bounds(num_frames=1, window_frames=5, stride_frames=2) == []
 
 
 def _person(box, score=0.9):

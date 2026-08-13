@@ -239,6 +239,13 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                     "fraction_possessed": fraction_possessed,
                     "player_displacement": player_displacement,
                     "player_displacement_rate": player_displacement_rate,
+                    # 0 here is ambiguous between "ball detected but always
+                    # far" and "ball never detected this window at all" -
+                    # ball_frames_detected disambiguates for log-reading:
+                    # a real 0 means total detection dropout (the harder
+                    # case a wider fusion window can't fix by itself, since
+                    # there's no position data to reason about at all).
+                    "ball_frames_detected": len(distances),
                 },
             )
         )
@@ -251,6 +258,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                 "fraction_possessed": fraction_possessed,
                 "player_displacement": player_displacement,
                 "generic_basketball_signal": generic_basketball,
+                "ball_frames_detected": len(distances),
             },
         )
 
@@ -260,12 +268,14 @@ def score_window(window: WindowSignals) -> ScoredLabel:
 def merge_adjacent_segments(scored_windows: list[tuple[WindowSignals, ScoredLabel]]):
     """Merge consecutive windows sharing the same label into single segments.
 
-    Analysis windows overlap (ACTION_WINDOW_STRIDE < ACTION_WINDOW_FRAMES, so
-    consecutive windows share frames for classifier context), so a new
-    window's start_time can fall before the previous segment's end_time. A
-    new segment's start is clamped to the previous segment's end so the
-    output timeline is contiguous and non-overlapping, which is what the
-    mobile timeline UI and the narrative's sequential wording both assume.
+    Both the coarse Kinetics windows (ACTION_WINDOW_STRIDE < ACTION_WINDOW_
+    FRAMES) and the fine fusion windows this function actually receives
+    (FUSION_WINDOW_STRIDE_SECONDS < FUSION_WINDOW_SECONDS) overlap by
+    design, so a new window's start_time can fall before the previous
+    segment's end_time. A new segment's start is clamped to the previous
+    segment's end so the output timeline is contiguous and non-overlapping,
+    which is what the mobile timeline UI and the narrative's sequential
+    wording both assume.
 
     Also majority-votes a dominant dribbling hand ("left"/"right") across
     every frame in a merged DRIBBLING segment, from each frame's

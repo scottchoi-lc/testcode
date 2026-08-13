@@ -43,6 +43,20 @@ class Settings:
     # smoothing quick individual actions into one long block.
     FUSION_WINDOW_SECONDS: float = float(os.getenv("FUSION_WINDOW_SECONDS", "0.8"))
 
+    # Stride (in seconds) between fusion windows - deliberately less than
+    # FUSION_WINDOW_SECONDS so consecutive windows overlap, the same way
+    # ACTION_WINDOW_STRIDE < ACTION_WINDOW_FRAMES makes Kinetics windows
+    # overlap above. Without overlap, a brief ball release (pass or shot)
+    # that happens to land right at a window boundary is split across two
+    # windows and neither one ever sees the "starts with the ball, ends
+    # without it" pattern score_window's shooting/passing branches look
+    # for - a real clip's logs showed exactly this (one window still had
+    # the ball, the very next had lost it entirely, and the release in
+    # between was never classified as anything but a gap). 0.4 (50% of the
+    # default 0.8s window) guarantees any such transition is fully
+    # contained in at least one window.
+    FUSION_WINDOW_STRIDE_SECONDS: float = float(os.getenv("FUSION_WINDOW_STRIDE_SECONDS", "0.4"))
+
     # Detection confidence thresholds. Ball is lower than person because a
     # basketball is small, fast-moving, and often motion-blurred - the
     # detector's confidence on real hits tends to run lower than it does for

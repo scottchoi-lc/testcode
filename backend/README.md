@@ -174,6 +174,44 @@ threshold it's standing in for, not merely nonzero. A *strong* Kinetics score
 can still corroborate a call the direct checks alone wouldn't quite make -
 the fix narrows the override, it doesn't remove it.
 
+### Overlapping fusion windows (catching releases at a window boundary)
+
+Fusion windows used to tile the clip back-to-back with no overlap
+(`frames[start_idx:end_idx]`, stride == window size). That's fine as long as
+a whole event fits inside one window, but a real clip's logs showed it
+silently swallowing a pass: one window still had the ball
+(`fraction_possessed: 0.6`, dribbling), and the very next window had lost it
+entirely (`fraction_possessed: 0.0`) - the release itself happened right at
+the boundary between them. Neither window ever saw the "starts with the
+ball, ends without it" shape that the shooting/passing branches in
+`fusion.py` require within a *single* window, so the pass just fell through
+to `dribbling` followed by `moving_without_ball`, with no PASSING segment at
+all.
+
+`FUSION_WINDOW_STRIDE_SECONDS` (0.4s, half of the default 0.8s
+`FUSION_WINDOW_SECONDS`) fixes this by making consecutive fusion windows
+overlap, the same way `ACTION_WINDOW_STRIDE < ACTION_WINDOW_FRAMES` already
+makes the coarser Kinetics windows overlap. `_fusion_window_bounds` in
+`pipeline.py` builds the (start, end) frame ranges; with 50% overlap, any
+transition that happens anywhere in the clip is guaranteed to be fully
+contained in at least one window, not split across two. `merge_adjacent_segments`
+already handled overlapping windows correctly (it was written for the
+Kinetics case), so no change was needed there beyond updating its docstring.
+
+This does **not** fix every missed pass by itself, and it's worth being
+explicit about the difference: it fixes windowing *cutting a visible
+transition in half*. It cannot manufacture a ball position that was never
+detected in the first place - if the ball drops out of detection entirely
+during the release (fast motion blur, occlusion, leaving frame) rather than
+being detected at a "far" position at least once, there's still no evidence
+for `score_window` to reason about, no matter how the windows are drawn.
+`ball_frames_detected` was added to the IDLE and MOVING_WITHOUT_BALL evidence
+dicts specifically so this can be told apart in the logs from a genuinely-far
+reading (`fraction_possessed: 0.0` with `ball_frames_detected: 0` means total
+dropout, not "detected but far") - if that shows up around a missed
+event, the next step is improving ball-detection recall during fast motion
+rather than further windowing changes.
+
 ## Running locally
 
 ```bash

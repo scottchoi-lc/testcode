@@ -305,6 +305,28 @@ def _nearest_kinetics_labels(
     return best[2]
 
 
+def _fusion_window_bounds(num_frames: int, window_frames: int, stride_frames: int) -> list[tuple[int, int]]:
+    """Start/end frame indices for the fine fusion-scoring windows.
+
+    `stride_frames < window_frames` makes windows overlap, which matters for
+    catching a brief release (pass or shot) that happens to land right at
+    what would otherwise be a hard tile boundary. A real clip's logs showed
+    exactly this: one non-overlapping window still had the ball close
+    (fraction_possessed=0.6), the very next had it gone entirely - the
+    release straddled the boundary, so neither window ever saw a "starts
+    with the ball, ends without it" pattern, and score_window's
+    shooting/passing branches (which both require that pattern within a
+    single window) never got a chance to fire. Overlap guarantees any such
+    transition is fully contained in at least one window."""
+    starts = list(range(0, max(1, num_frames - 1), stride_frames)) or [0]
+    bounds = []
+    for start in starts:
+        end = min(num_frames, start + window_frames)
+        if end - start >= 2:
+            bounds.append((start, end))
+    return bounds
+
+
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
@@ -442,12 +464,10 @@ def run_pipeline(
         report(0.6 + 0.25 * (wi + 1) / len(kinetics_starts))
 
     fusion_window_frames = max(3, round(settings.FUSION_WINDOW_SECONDS * settings.ANALYSIS_FPS))
+    fusion_stride_frames = max(1, round(settings.FUSION_WINDOW_STRIDE_SECONDS * settings.ANALYSIS_FPS))
     scored_windows = []
-    fusion_starts = list(range(0, len(frames), fusion_window_frames)) or [0]
-    for fi, start_idx in enumerate(fusion_starts):
-        end_idx = min(len(frames), start_idx + fusion_window_frames)
-        if end_idx - start_idx < 2:
-            continue
+    fusion_bounds = _fusion_window_bounds(len(frames), fusion_window_frames, fusion_stride_frames)
+    for fi, (start_idx, end_idx) in enumerate(fusion_bounds):
         window_frames = frames[start_idx:end_idx]
         window_frame_signals = frame_signals[start_idx:end_idx]
         midpoint = (window_frames[0].timestamp + window_frames[-1].timestamp) / 2
@@ -468,7 +488,7 @@ def run_pipeline(
             scored.confidence,
             scored.evidence,
         )
-        report(0.85 + 0.15 * (fi + 1) / len(fusion_starts))
+        report(0.85 + 0.15 * (fi + 1) / len(fusion_bounds))
 
     segments = merge_adjacent_segments(scored_windows)
     logger.info(
