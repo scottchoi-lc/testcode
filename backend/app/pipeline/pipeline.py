@@ -52,6 +52,7 @@ from app.models.pose import get_pose_model
 from app.pipeline.fusion import (
     BALL_POSSESSION_MAX_DIST,
     FrameSignals,
+    ScoredLabel,
     WindowSignals,
     _effective_ball_distance,
     merge_adjacent_segments,
@@ -435,7 +436,17 @@ def run_pipeline(
     progress_cb: ProgressCallback | None = None,
     selected_player_box: tuple[float, float, float, float] | None = None,
     selected_timestamp: float | None = None,
+    debug_scored_windows: list[tuple[WindowSignals, ScoredLabel]] | None = None,
 ) -> AnalysisResult:
+    """See module docstring for the pipeline steps. `debug_scored_windows`,
+    if passed a list, gets extended in place with every (WindowSignals,
+    ScoredLabel) pair scored during the run - the raw per-window evidence
+    and prediction that `segments` (the merged, narrated output) is built
+    from. Exists so tooling (e.g. comparing predictions against hand-
+    labeled ground truth) can reuse the exact production pipeline - same
+    tracking, same windowing, same scoring - without duplicating any of it,
+    rather than reading it out of log lines."""
+
     def report(fraction: float) -> None:
         if progress_cb:
             progress_cb(min(1.0, max(0.0, fraction)))
@@ -606,6 +617,9 @@ def run_pipeline(
             scored.evidence,
         )
         report(0.85 + 0.15 * (fi + 1) / len(fusion_bounds))
+
+    if debug_scored_windows is not None:
+        debug_scored_windows.extend(scored_windows)
 
     segments = merge_adjacent_segments(scored_windows)
     logger.info(

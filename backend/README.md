@@ -418,3 +418,41 @@ Either way, keep the license of whatever base model gets fine-tuned in mind
 checkpoint this project moved away from) constrains what you can do with
 the fine-tuned result too, regardless of how the fine-tuning data itself is
 licensed.
+
+### Checking labeled clips against the current pipeline
+
+Before investing in either path above, `scripts/compare_labels.py` runs
+hand-labeled ground truth against the *current* rule-based pipeline, using
+`run_pipeline`'s `debug_scored_windows` hook to get the raw per-window
+predictions (not just the merged/narrated output) - the same
+tracking/windowing/scoring a real `/analyze` call uses, no duplicated
+logic to drift out of sync.
+
+```bash
+cd backend
+python scripts/compare_labels.py --csv labels.csv --clips-dir ./clips
+```
+
+`labels.csv` uses the same format as the labeling spreadsheet: one row per
+labeled segment (`clip_filename,segment_start_sec,segment_end_sec,label,
+dominant_hand,notes`), `label` matching `ActionLabel`'s values exactly.
+Writes a per-window comparison (`label_comparison.csv` by default:
+ground truth vs. predicted vs. confidence vs. raw evidence) and prints an
+agreement rate plus a confusion breakdown.
+
+If the clip was analyzed in the app with a tapped player selection rather
+than the default heuristic, pass the same box/timestamp so the comparison
+tracks the same person you labeled: `--clip my_clip.mov --selected-box
+"[120,80,340,420]" --selected-timestamp 2.1` (same `[x1,y1,x2,y2]`/seconds
+format the API takes - `--selected-box`/`--selected-timestamp` only apply
+with `--clip`, since they're specific to one clip at a time). Without a
+matching selection, a mismatch might mean the heuristic tracked a
+different player than the one you labeled, not that the fusion logic is
+wrong - worth ruling out before reading too much into a low agreement
+rate.
+
+This alone won't fix anything - it's a diagnostic, not a training step -
+but it's the fastest way to see concretely where the current heuristics
+agree or disagree with real ground truth before deciding whether labeling
+more clips (and building on path 1 or 2 above) is worth the time
+investment.
