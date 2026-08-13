@@ -76,9 +76,28 @@ class ActionClassifier:
         frames_rgb = [f[:, :, ::-1] for f in frames_bgr]
         frames_rgb = _resample_to_length(frames_rgb, self._num_frames)
 
+        # `images=`, not `videos=`: newer `transformers` added `videos=` as a
+        # convenience alias that maps internally to `images=`, but older
+        # releases (e.g. the last ones still installable on Python 3.9) never
+        # had a `videos` parameter at all - passed as a keyword, it silently
+        # falls into **kwargs and gets ignored, leaving `images=None` and no
+        # `pixel_values` in the output at all (confirmed from a real
+        # `AttributeError: 'NoneType' object has no attribute 'shape'` on
+        # `pixel_values.shape` inside the model - not a shape mismatch, a
+        # missing key). `images=` is understood by both: even the newest
+        # processor's `videos=` support is just `if videos is not None and
+        # images is None: images = videos` before delegating onward, so
+        # passing `images=` directly skips that alias and works identically.
         inputs = self._processor(
-            text=self.candidate_labels, videos=frames_rgb, return_tensors="pt", padding=True
+            text=self.candidate_labels, images=frames_rgb, return_tensors="pt", padding=True
         )
+        if inputs.get("pixel_values") is None:
+            raise RuntimeError(
+                "XCLIPProcessor did not produce pixel_values for the video frames. "
+                "This usually means the installed `transformers` version's XCLIPProcessor "
+                "expects a different argument for video frames than `images=`/`videos=` - "
+                "check `XCLIPProcessor.__call__`'s signature for the installed version."
+            )
         inputs = {k: v.to(self._device) for k, v in inputs.items()}
         with torch.no_grad():
             logits_per_video = self._model(**inputs).logits_per_video[0]
