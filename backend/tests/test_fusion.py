@@ -54,6 +54,22 @@ def test_passing_detected_from_lateral_release_without_shooting_motion():
     assert result.confidence > 0.4
 
 
+def test_dribbling_detected_with_low_possession_fraction_from_real_bounce_pattern():
+    # Real dribbling spends most of each bounce cycle with the ball in
+    # flight, away from the hand - only 1 of 3 detected-ball frames here
+    # reads as "possessed" (fraction_possessed = 1/3 ~= 0.33), which is
+    # exactly the kind of window DRIBBLE_POSSESSION_MIN_FRACTION=0.3 exists
+    # to still catch, versus a naive majority-of-frames requirement.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.6), dist=0.3),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.9), dist=1.1),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.6), dist=1.2),
+    ]
+    window = WindowSignals(0.0, 0.4, frames)
+    result = score_window(window)
+    assert result.label == ActionLabel.DRIBBLING
+
+
 def test_dribbling_detected_via_wrist_distance_despite_far_bbox_center():
     # Extended-arm dribble: the ball is far from the player's bbox *center*
     # (dist=1.2, above BALL_POSSESSION_MAX_DIST=0.9) every frame, which alone

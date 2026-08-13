@@ -40,6 +40,17 @@ DRIBBLE_VERTICAL_STD_MAX = 0.35
 PLAYER_MOVE_MIN_DISPLACEMENT = 0.5
 WRIST_ABOVE_SHOULDER_MARGIN = 0.02
 
+# Minimum fraction of ball-detected frames within a window that must read as
+# "possessed" (<= BALL_POSSESSION_MAX_DIST) to call it dribbling. Lower than
+# it might look: real dribbling has the ball in flight, away from the hand,
+# for most of each bounce cycle - only briefly close at the top of the
+# bounce - so requiring a majority of frames to show "close" systematically
+# under-detects genuine dribbling. Tuned against one real clip (the only
+# window with any real ball-proximity signal measured fraction_possessed=0.3,
+# well under a naive 0.6 majority bar) rather than a validated dataset, so
+# revisit if it starts producing false-positive dribbling calls elsewhere.
+DRIBBLE_POSSESSION_MIN_FRACTION = 0.3
+
 
 @dataclass
 class FrameSignals:
@@ -131,7 +142,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # --- Dribbling: ball stays close to the player most of the window and
     # bounces rhythmically (low-to-moderate vertical variance, not a single
     # big upward launch). ---
-    if fraction_possessed >= 0.6 and len(ball_ys) >= 3:
+    if fraction_possessed >= DRIBBLE_POSSESSION_MIN_FRACTION and len(ball_ys) >= 3:
         vertical_std = statistics.pstdev(ball_ys)
         if vertical_std <= DRIBBLE_VERTICAL_STD_MAX or dribble_boost > 0:
             confidence = min(1.0, 0.45 + 0.3 * fraction_possessed + 0.25 * dribble_boost)

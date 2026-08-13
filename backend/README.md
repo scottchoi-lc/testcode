@@ -40,6 +40,15 @@ even while a wrist has it in hand, so bbox-center distance alone
 under-detects possession in exactly that case. `_effective_ball_distance()`
 takes whichever of the two signals is smaller per frame.
 
+`DRIBBLE_POSSESSION_MIN_FRACTION` (0.3, down from an earlier 0.6) is
+deliberately less than "the ball must be close most of the time": real
+dribbling has the ball in flight, away from the hand, for most of each
+bounce cycle, so requiring a frame-majority of "close" readings
+systematically under-detects it. This was tuned against one real clip
+rather than a validated dataset — if it starts over-calling dribbling on
+other footage (e.g. brief incidental ball-near-player contact getting
+mislabeled), that threshold is the first place to revisit.
+
 This is a heuristic, best-effort system, not a validated basketball-specific
 classifier — see "Improving accuracy" below for the natural next step
 (fine-tuning a dedicated model on labeled basketball footage). Jersey-number
