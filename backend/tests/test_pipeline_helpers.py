@@ -92,8 +92,9 @@ def test_interpolate_ball_gaps_fills_short_gap_between_known_positions():
         _fs(0.2, player=(0.0, 0.0), ball=None, dist=None),
         _fs(0.4, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
     ]
-    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    result, filled, longest_gap = _interpolate_ball_gaps(frames, max_gap_frames=2)
     assert filled == 1
+    assert longest_gap == 1
     assert result[1].ball_center == (1.0, 0.0)
     assert result[1].ball_player_distance == 1.0
     # Real readings are untouched.
@@ -109,8 +110,12 @@ def test_interpolate_ball_gaps_leaves_gap_longer_than_bound():
         _fs(0.6, player=(0.0, 0.0), ball=None, dist=None),
         _fs(0.8, player=(0.0, 0.0), ball=(6.0, 0.0), dist=6.0),
     ]
-    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    result, filled, longest_gap = _interpolate_ball_gaps(frames, max_gap_frames=2)
     assert filled == 0
+    # Reported even though it wasn't filled - this is what tells a caller
+    # how far over the bound a real clip's gap actually ran, rather than
+    # just "0 filled" with no way to tell a 1-frame miss from a 20-frame one.
+    assert longest_gap == 3
     assert result[1].ball_center is None
     assert result[2].ball_center is None
     assert result[3].ball_center is None
@@ -122,8 +127,9 @@ def test_interpolate_ball_gaps_leaves_gap_without_valid_bounds_on_both_sides():
         _fs(0.0, player=(0.0, 0.0), ball=None, dist=None),
         _fs(0.2, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
     ]
-    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    result, filled, longest_gap = _interpolate_ball_gaps(frames, max_gap_frames=2)
     assert filled == 0
+    assert longest_gap == 1
     assert result[0].ball_center is None
 
 
@@ -138,8 +144,9 @@ def test_interpolate_ball_gaps_does_not_bridge_across_untracked_player_frame():
         _fs(0.4, player=None, ball=None, dist=None),
         _fs(0.6, player=(0.0, 0.0), ball=(4.0, 0.0), dist=4.0),
     ]
-    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    result, filled, longest_gap = _interpolate_ball_gaps(frames, max_gap_frames=2)
     assert filled == 0
+    assert longest_gap == 1
     assert result[1].ball_center is None
 
 

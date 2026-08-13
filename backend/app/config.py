@@ -98,11 +98,22 @@ class Settings:
     # and a real clip logged a whole fusion window with zero ball
     # detections right where a pass actually happened, leaving the
     # passing/shooting heuristics with no position data at all even after
-    # widening the fusion windows to overlap. 2 frames (~0.3s at the
-    # default ANALYSIS_FPS=6) is a brief-miss bound, not a long occlusion
-    # or the ball genuinely leaving the frame - those are intentionally
-    # left uninterpolated rather than inventing a fictitious trajectory.
-    BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "2"))
+    # widening the fusion windows to overlap.
+    #
+    # Started at 2 frames (~0.3s) but a real clip's release still went
+    # completely undetected at that bound - two adjacent fusion windows
+    # showed ball_frames_detected of 1 and 0 respectively (out of ~5 raw
+    # frames each), meaning the actual gap ran longer than 2 consecutive
+    # frames, confirmed directly by pipeline.py's "Ball gap interpolation:
+    # ... longest gap seen=N frames" log line rather than inferred. Raised
+    # to 4 (~0.7s) as a evidence-motivated next step, not a re-guess - if
+    # `longest_ball_gap_frames` in that log still exceeds this bound on a
+    # clip where a release is missed, that's the number to raise it to
+    # next, or the sign to address detection recall directly instead (e.g.
+    # BALL_SCORE_THRESHOLD) rather than keep widening this window, since a
+    # long enough gap starts fabricating more of the trajectory than it's
+    # reasonable to trust a straight-line interpolation for.
+    BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "4"))
 
     # How far past a fusion window's end to look, when deciding whether a
     # candidate PASSING window is actually a crossover/hesitation dribble:

@@ -340,11 +340,15 @@ def _fusion_window_bounds(num_frames: int, window_frames: int, stride_frames: in
 
 def _interpolate_ball_gaps(
     frame_signals: list[FrameSignals | None], max_gap_frames: int
-) -> tuple[list[FrameSignals | None], int]:
+) -> tuple[list[FrameSignals | None], int, int]:
     """Linearly interpolate ball position/distance across short runs of
     consecutive frames where the player was tracked but the ball wasn't
     detected, bounded by `max_gap_frames` on each side. Returns the filled
-    list and how many frames were interpolated (for logging).
+    list, how many frames were interpolated, and the longest such gap seen
+    in the clip regardless of whether it was short enough to fill (for
+    logging - `longest_gap_frames` is what tells you whether
+    `max_gap_frames` needs raising, versus `filled` alone which stays 0
+    whether the real gap is 1 frame too long or 20).
 
     Only fills a gap when there's a real ball reading immediately before
     *and* after it (so leading/trailing gaps, or gaps longer than the
@@ -355,6 +359,7 @@ def _interpolate_ball_gaps(
     n = len(frame_signals)
     result = list(frame_signals)
     filled = 0
+    longest_gap_frames = 0
     i = 0
     while i < n:
         f = frame_signals[i]
@@ -369,6 +374,7 @@ def _interpolate_ball_gaps(
                 i += 1
             end = i
             gap_len = end - start
+            longest_gap_frames = max(longest_gap_frames, gap_len)
             before = frame_signals[start - 1] if start > 0 else None
             after = frame_signals[end] if end < n else None
             if (
@@ -401,7 +407,7 @@ def _interpolate_ball_gaps(
                     filled += 1
         else:
             i += 1
-    return result, filled
+    return result, filled, longest_gap_frames
 
 
 def _ball_returns_to_possession_soon(
@@ -540,13 +546,14 @@ def run_pipeline(
         hand_votes,
     )
 
-    frame_signals, ball_gap_frames_filled = _interpolate_ball_gaps(
+    frame_signals, ball_gap_frames_filled, longest_ball_gap_frames = _interpolate_ball_gaps(
         frame_signals, settings.BALL_GAP_INTERPOLATION_MAX_FRAMES
     )
     logger.info(
-        "Ball gap interpolation: %d frame(s) filled (max_gap=%d)",
+        "Ball gap interpolation: %d frame(s) filled (max_gap=%d), longest gap seen=%d frames",
         ball_gap_frames_filled,
         settings.BALL_GAP_INTERPOLATION_MAX_FRAMES,
+        longest_ball_gap_frames,
     )
 
     player_number = jersey_votes.best_guess()

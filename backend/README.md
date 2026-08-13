@@ -271,7 +271,7 @@ it's flying across the frame during a release).
 
 `_interpolate_ball_gaps` in `pipeline.py` runs once after per-frame
 tracking finishes, over the whole clip's frame signals: for any run of up
-to `BALL_GAP_INTERPOLATION_MAX_FRAMES` (default 2, ~0.3s at
+to `BALL_GAP_INTERPOLATION_MAX_FRAMES` (default 4, ~0.7s at
 `ANALYSIS_FPS=6`) consecutive frames where the player was tracked but the
 ball wasn't detected, it linearly interpolates the ball's position (and
 wrist distance, if available) from the nearest real detection immediately
@@ -282,12 +282,24 @@ itself was tracked continuously through the gap (a tracking loss isn't
 papered over with an invented ball position for an unknown player
 location). Longer gaps - the ball genuinely leaving the frame, sustained
 occlusion - are left alone rather than fabricating a multi-second
-trajectory. `"Ball gap interpolation: %d frame(s) filled"` is logged once
-per run so this can be checked against real footage; if a miss is still
-happening with 0 frames filled, the gap is longer than
-`BALL_GAP_INTERPOLATION_MAX_FRAMES` and the next thing to try is raising
-that bound or improving detection recall directly (e.g. a lower
-`BALL_SCORE_THRESHOLD`, at the cost of more false-positive ball hits).
+trajectory.
+
+The bound started at 2 frames but wasn't enough: a real clip's pass still
+went completely undetected at that setting, confirmed (not guessed) from
+the log line described below rather than inferred from the segments alone.
+Raised to 4 as the evidence-motivated next step. `_interpolate_ball_gaps`
+now returns (and `"Ball gap interpolation: %d frame(s) filled (max_gap=%d),
+longest gap seen=%d frames"` logs) the *actual* longest gap encountered in
+the clip, whether or not it was short enough to fill - this is what makes
+the bound checkable against real footage instead of a guess: "0 filled"
+alone can't tell a 1-frame-too-long miss from a 20-frame one, but
+`longest_ball_gap_frames` can. If a miss still happens and that number
+exceeds `BALL_GAP_INTERPOLATION_MAX_FRAMES`, raise the bound to match (or
+a bit above) it; if raising the bound repeatedly doesn't converge, that's
+the signal to address detection recall directly instead (e.g. a lower
+`BALL_SCORE_THRESHOLD`, at the cost of more false-positive ball hits) -
+a long enough gap starts fabricating more of the ball's real trajectory
+than a straight-line interpolation should be trusted for.
 
 ### Telling a crossover dribble apart from a pass
 
