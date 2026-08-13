@@ -123,22 +123,36 @@ wrong physical person - both found from a real clip's logs, in order:
    to a large net displacement across a window, most likely because two
    players were near each other and position alone couldn't tell them
    apart.
-2. **Appearance disambiguation**: when *multiple* detections are all
-   within the jump cap of the last known position (the ambiguous case
-   position can't resolve), `_pick_primary_player` breaks the tie with an
-   HSV color-histogram comparison (`_color_histogram`/
-   `_appearance_similarity`) against a reference signature captured once,
-   from whichever frame first successfully tracks the player. This is a
-   cheap, local tie-breaker (a few dozen players' worth of jersey/skin
-   color, not a trained re-identification model) - it won't help if two
-   players are dressed identically, but directly targets the "two people
-   close together" case position-only tracking structurally cannot solve.
+2. **Appearance verification**: once a reference appearance exists (an HSV
+   color histogram, `_color_histogram`/`_appearance_similarity`, captured
+   once from whichever frame first successfully tracks the player - the
+   exact tapped frame when a player was selected), every plausible-by-
+   position candidate is checked against it on *every* frame, not just
+   when there's an ambiguous tie between multiple detections. That
+   distinction mattered: a tie-breaker that only activates when there's a
+   tie never gets a chance to catch a *lone* wrong-person detection, which
+   is exactly what later frames tend to have once tracking has already
+   drifted - by then there's usually only one nearby candidate (the wrong
+   person), not an ambiguous pair. `MIN_APPEARANCE_SIMILARITY` is the
+   minimum match required to accept a candidate as a continuation; below
+   it, the frame is treated as "no detection" (same as an implausible
+   jump) rather than accepted.
 
-Both are deliberately tuned against one real clip's evidence rather than a
-validated dataset; `tracking_debug_stats` (logged per run:
-`implausible_jumps_rejected`, `max_jump_seen`,
-`ambiguous_frames_disambiguated_by_appearance`) is there to check whether
-either layer needs retuning on other footage.
+Both layers are cheap, local checks (a few dozen pixels' worth of jersey/
+skin color, not a trained re-identification model) tuned against one real
+clip's evidence rather than a validated dataset - `tracking_debug_stats`
+(logged per run: `implausible_jumps_rejected`, `max_jump_seen`,
+`ambiguous_frames_disambiguated_by_appearance`,
+`appearance_mismatches_rejected`) is there to check whether either needs
+retuning on other footage. Known limitations: two players in matching
+uniforms won't be distinguishable by appearance at all, and checking
+appearance on every frame (rather than only when ambiguous) trades some
+risk of *over*-rejecting the correct player under a real lighting/angle
+change partway through a clip for the ability to actually catch a drifted
+identity - if `frames_with_player` (in the "Dribbling-hand debug" log)
+drops noticeably compared to `appearance_mismatches_rejected` being high,
+that trade is biting and `MIN_APPEARANCE_SIMILARITY` is the first knob to
+loosen.
 
 ## Running locally
 

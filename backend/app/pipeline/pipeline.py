@@ -70,18 +70,28 @@ ProgressCallback = Callable[[float], None]
 MAX_PLAUSIBLE_TRACKING_JUMP = 3.0
 
 
+# Minimum appearance similarity (cv2.HISTCMP_CORREL, roughly -1..1) a
+# candidate must reach to be trusted as the same person once a reference
+# appearance exists. This is checked on *every* frame, not just when
+# multiple detections are ambiguously close by position - a single wrong-
+# person detection near the last known position would otherwise sail
+# through untested, since there was nothing to disambiguate it *against*.
+# That mattered in practice: once tracking drifted, later frames usually
+# only had one nearby candidate (the wrong person), so a tie-breaker that
+# only activates when there's a tie never got a chance to catch it.
+MIN_APPEARANCE_SIMILARITY = 0.3
+
+
 def _color_histogram(image_bgr: np.ndarray, box: tuple[float, float, float, float]):
     """A cheap appearance signature for a person crop (HSV color histogram).
 
-    Used to disambiguate when *multiple* detections are all within
-    MAX_PLAUSIBLE_TRACKING_JUMP of the last known position - e.g. two
-    players standing/moving near each other - which position alone cannot
-    tell apart (that's how tracking silently drifted from a passer onto a
-    nearby receiver in a real clip: each single-frame step was individually
-    "plausible" by distance, so the jump cap never fired). Not a general
-    re-identification model and not robust to major lighting/angle changes
-    across a whole clip - it's a local tie-breaker, not a global identity
-    check.
+    Compared against a reference signature (captured once, from whichever
+    frame first successfully tracks the player - the exact tapped frame
+    when a player was selected) to verify continuity every frame, not just
+    to break ties among multiple candidates - see MIN_APPEARANCE_SIMILARITY.
+    Not a general re-identification model and not robust to major lighting/
+    angle changes across a whole clip, or to two players in matching
+    uniforms.
     """
     x1, y1, x2, y2 = (int(round(v)) for v in box)
     height, width = image_bgr.shape[:2]
@@ -129,15 +139,24 @@ def _pick_primary_player(
             stats["max_jump_seen"] = max(stats["max_jump_seen"], jump_for(nearest))
         return None
 
-    if len(plausible) == 1 or image_bgr is None or reference_appearance is None:
+    if image_bgr is None or reference_appearance is None:
         return min(plausible, key=jump_for)
 
-    if stats is not None:
+    # A reference appearance exists (either from a tapped selection or the
+    # default heuristic's first pick) - verify every plausible candidate
+    # against it, not just when there's more than one to choose between.
+    scored = [
+        (d, _appearance_similarity(reference_appearance, _color_histogram(image_bgr, d.box)))
+        for d in plausible
+    ]
+    best, best_score = max(scored, key=lambda item: item[1])
+    if best_score < MIN_APPEARANCE_SIMILARITY:
+        if stats is not None:
+            stats["appearance_mismatches_rejected"] += 1
+        return None
+    if len(plausible) > 1 and stats is not None:
         stats["ambiguous_frames_disambiguated_by_appearance"] += 1
-    return max(
-        plausible,
-        key=lambda d: _appearance_similarity(reference_appearance, _color_histogram(image_bgr, d.box)),
-    )
+    return best
 
 
 def _pick_ball(balls: list[Detection], player_center: tuple[float, float] | None) -> Detection | None:
@@ -321,6 +340,7 @@ def run_pipeline(
         "implausible_jumps_rejected": 0,
         "max_jump_seen": 0.0,
         "ambiguous_frames_disambiguated_by_appearance": 0,
+        "appearance_mismatches_rejected": 0,
     }
     # Appearance signature of the tracked player, established from whichever
     # frame first successfully picks one (the seed frame itself when a

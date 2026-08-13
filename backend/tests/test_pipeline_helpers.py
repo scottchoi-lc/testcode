@@ -135,6 +135,56 @@ def test_pick_primary_player_records_disambiguation_stat():
     assert stats["ambiguous_frames_disambiguated_by_appearance"] == 1
 
 
+def test_pick_primary_player_rejects_lone_candidate_with_mismatched_appearance():
+    # Only one candidate is within jump range - no ambiguous tie for a
+    # tie-breaker to resolve - but its appearance doesn't match the
+    # reference at all. Once tracking has drifted onto a wrong person,
+    # later frames typically only have *one* nearby candidate (the wrong
+    # person), so this must be checked even without a tie, or a lost
+    # identity is never recovered.
+    box = (10, 10, 40, 40)
+    blue_frame = _solid_color_image([((255, 0, 0), box)])  # candidate is blue
+    red_reference_frame = _solid_color_image([((0, 0, 255), box)])  # reference is red
+    reference = _color_histogram(red_reference_frame, box)
+
+    result = _pick_primary_player(
+        [_person(box)], previous_center=(25.0, 25.0), image_bgr=blue_frame, reference_appearance=reference
+    )
+    assert result is None
+
+
+def test_pick_primary_player_records_appearance_mismatch_stat():
+    box = (10, 10, 40, 40)
+    blue_frame = _solid_color_image([((255, 0, 0), box)])
+    red_reference_frame = _solid_color_image([((0, 0, 255), box)])
+    reference = _color_histogram(red_reference_frame, box)
+    stats = {
+        "implausible_jumps_rejected": 0,
+        "max_jump_seen": 0.0,
+        "ambiguous_frames_disambiguated_by_appearance": 0,
+        "appearance_mismatches_rejected": 0,
+    }
+    result = _pick_primary_player(
+        [_person(box)],
+        previous_center=(25.0, 25.0),
+        image_bgr=blue_frame,
+        reference_appearance=reference,
+        stats=stats,
+    )
+    assert result is None
+    assert stats["appearance_mismatches_rejected"] == 1
+
+
+def test_pick_primary_player_accepts_lone_candidate_matching_appearance():
+    box = (10, 10, 40, 40)
+    image = _solid_color_image([((0, 0, 255), box)])
+    reference = _color_histogram(image, box)
+    result = _pick_primary_player(
+        [_person(box)], previous_center=(25.0, 25.0), image_bgr=image, reference_appearance=reference
+    )
+    assert result is not None
+
+
 def test_pick_primary_player_falls_back_to_nearest_without_appearance_signal():
     # Same ambiguous setup, but no reference appearance provided (e.g. it
     # couldn't be computed) - falls back to plain nearest-by-position rather
