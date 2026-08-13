@@ -1,10 +1,21 @@
-"""FastAPI application: upload a basketball clip, get back an action timeline."""
+"""FastAPI application: upload a basketball clip, get back an action timeline.
+
+Unlike the rest of the backend, this file avoids the `X | None` union
+syntax (PEP 604) in favor of `typing.Optional[X]` - FastAPI eagerly
+resolves every route handler's parameter types at startup, and `X | None`
+as a real runtime expression only works on Python 3.10+. A jersey_number
+parameter using `str | None` crashed uvicorn at import time on a Python 3.9
+venv even though the rest of the codebase's `X | None` annotations (never
+eagerly evaluated - plain functions/dataclasses, not FastAPI routes) were
+fine. Keep new route handler parameters on `Optional[X]`.
+"""
 from __future__ import annotations
 
 import logging
 import re
 import uuid
 from pathlib import Path
+from typing import Optional
 
 from fastapi import BackgroundTasks, FastAPI, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,7 +46,7 @@ def health() -> dict:
 _JERSEY_NUMBER_RE = re.compile(r"^\d{1,2}$")
 
 
-def _normalize_jersey_number(raw: str | None) -> str | None:
+def _normalize_jersey_number(raw: Optional[str]) -> Optional[str]:
     """Digits only, 1-2 characters, matching what jersey OCR ever produces
     (see app/models/jersey_ocr.py's _DIGIT_RE). Anything else - empty,
     letters, too long - is treated as "no number requested" rather than
@@ -46,7 +57,7 @@ def _normalize_jersey_number(raw: str | None) -> str | None:
     return stripped if _JERSEY_NUMBER_RE.match(stripped) else None
 
 
-def _process_job(job_id: str, video_path: str, target_jersey_number: str | None) -> None:
+def _process_job(job_id: str, video_path: str, target_jersey_number: Optional[str]) -> None:
     job_store.update(job_id, status=JobStatus.PROCESSING, progress=0.0)
 
     def on_progress(fraction: float) -> None:
@@ -68,7 +79,7 @@ def _process_job(job_id: str, video_path: str, target_jersey_number: str | None)
 async def analyze(
     video: UploadFile,
     background_tasks: BackgroundTasks,
-    jersey_number: str | None = Form(None),
+    jersey_number: Optional[str] = Form(None),
 ) -> JobResponse:
     if video.content_type is None or not video.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="Uploaded file must be a video")
