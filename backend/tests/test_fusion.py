@@ -87,6 +87,58 @@ def test_dribbling_detected_via_wrist_distance_despite_far_bbox_center():
     assert result.label == ActionLabel.DRIBBLING
 
 
+def test_shooting_not_triggered_by_weak_kinetics_noise_alone():
+    # Real clip: fraction_wrist_high=0.0 and the ball never released, yet
+    # kinetics_shoot_score=0.088 - softmax noise, not a real "shooting
+    # basketball" prediction - was enough to trigger SHOOTING under the old
+    # `shoot_boost > 0` bypass, which treated *any* nonzero Kinetics score as
+    # a hard override for both the wrist-height and release checks. Neither
+    # real signal is present here (ball stays put, wrist never rises), so a
+    # weak score below KINETICS_OVERRIDE_MIN must not manufacture a shot.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.3, wrist_high=False),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting basketball", 0.088)])
+    result = score_window(window)
+    assert result.label != ActionLabel.SHOOTING
+    # The ball sitting still and close the whole window is a textbook (if
+    # boring) dribble/possession read, not a shot - pin the actual label so
+    # this test also catches any future regression in the dribbling branch.
+    assert result.label == ActionLabel.DRIBBLING
+
+
+def test_dribbling_not_triggered_by_weak_kinetics_noise_alone():
+    # Same bug, other branch: a bouncy/erratic ball trajectory
+    # (vertical_std well above DRIBBLE_VERTICAL_STD_MAX) shouldn't be
+    # relabeled DRIBBLING just because the Kinetics classifier assigned it a
+    # tiny, likely-noise probability for "dribbling basketball".
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.1), dist=1.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.9), dist=0.3),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.1), dist=1.0),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("dribbling basketball", 0.1)])
+    result = score_window(window)
+    assert result.label != ActionLabel.DRIBBLING
+
+
+def test_shooting_still_detected_when_kinetics_score_clears_override_threshold():
+    # Sanity check for the other direction: a *strong* Kinetics signal (at
+    # or above KINETICS_OVERRIDE_MIN) should still be able to corroborate a
+    # shot even when the direct release check alone wouldn't quite clear the
+    # bar - the fix narrows the override, it doesn't remove it.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=True),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=0.5, wrist_high=True),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.2), dist=0.6, wrist_high=True),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[("shooting basketball", 0.6)])
+    result = score_window(window)
+    assert result.label == ActionLabel.SHOOTING
+
+
 def test_moving_without_ball_when_no_possession_but_player_displaces():
     frames = [
         _frame(0.0, player=(0.2, 0.5), ball=None, dist=None, wrist_high=None),

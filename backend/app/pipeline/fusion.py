@@ -59,6 +59,19 @@ PLAYER_MOVE_MIN_DISPLACEMENT_RATE = 0.2
 # revisit if it starts producing false-positive dribbling calls elsewhere.
 DRIBBLE_POSSESSION_MIN_FRACTION = 0.3
 
+# Minimum Kinetics softmax score for "dribbling basketball"/"shooting
+# basketball" to count as corroborating evidence that can substitute for a
+# missing direct-signal check (vertical std / wrist height / release). A
+# bare `> 0` here is a bug, not a threshold: VideoMAE's softmax spreads a
+# little probability mass over most of its 400 classes, so an unrelated
+# window can show e.g. kinetics_shoot_score=0.088 with zero real shooting
+# evidence (fraction_wrist_high=0.0, ball_released=False) and still get
+# labeled SHOOTING purely from that noise floor - this was caught from a
+# real clip's logs where exactly that happened. 0.3 matches the existing
+# fraction_wrist_high >= 0.3 bar so a Kinetics-only override needs to be as
+# convincing as the direct-evidence threshold it's standing in for.
+KINETICS_OVERRIDE_MIN = 0.3
+
 
 @dataclass
 class FrameSignals:
@@ -154,7 +167,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # big upward launch). ---
     if fraction_possessed >= DRIBBLE_POSSESSION_MIN_FRACTION and len(ball_ys) >= 3:
         vertical_std = statistics.pstdev(ball_ys)
-        if vertical_std <= DRIBBLE_VERTICAL_STD_MAX or dribble_boost > 0:
+        if vertical_std <= DRIBBLE_VERTICAL_STD_MAX or dribble_boost >= KINETICS_OVERRIDE_MIN:
             confidence = min(1.0, 0.45 + 0.3 * fraction_possessed + 0.25 * dribble_boost)
             candidates.append(
                 ScoredLabel(
@@ -173,7 +186,9 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # (moving up/away rather than staying put). ---
     if distances and distances[0] <= BALL_POSSESSION_MAX_DIST:
         released = distances[-1] >= BALL_RELEASE_MIN_DIST if len(distances) > 1 else False
-        if (fraction_wrist_high >= 0.3 or shoot_boost > 0) and (released or shoot_boost > 0):
+        if (fraction_wrist_high >= 0.3 or shoot_boost >= KINETICS_OVERRIDE_MIN) and (
+            released or shoot_boost >= KINETICS_OVERRIDE_MIN
+        ):
             confidence = min(
                 1.0, 0.4 + 0.3 * fraction_wrist_high + 0.3 * shoot_boost + (0.15 if released else 0)
             )

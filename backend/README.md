@@ -154,6 +154,26 @@ drops noticeably compared to `appearance_mismatches_rejected` being high,
 that trade is biting and `MIN_APPEARANCE_SIMILARITY` is the first knob to
 loosen.
 
+### Kinetics score as corroboration, not an override
+
+An earlier version of `fusion.py` treated *any* nonzero Kinetics score for
+"dribbling basketball"/"shooting basketball" (`dribble_boost`/`shoot_boost`)
+as a hard bypass for the branch's real evidence checks - e.g. the shooting
+branch's `fraction_wrist_high >= 0.3 or shoot_boost > 0`. That looks like a
+threshold but isn't one: VideoMAE's softmax spreads a sliver of probability
+across most of its 400 Kinetics classes, so a window with zero real shooting
+evidence (`fraction_wrist_high: 0.0`, `ball_released: False`) could still
+carry `kinetics_shoot_score: 0.088` - noise, not a real "this is a shot"
+signal - and get labeled SHOOTING purely from that. This was diagnosed from
+a real clip's `Window` logs showing exactly that combination, and explained
+a narrative that had a player pass then immediately shoot - both windows had
+near-zero direct evidence but a nonzero Kinetics score. `KINETICS_OVERRIDE_MIN`
+(0.3, matching the existing `fraction_wrist_high >= 0.3` bar) is the fix: a
+Kinetics-only override now has to be as convincing as the direct-evidence
+threshold it's standing in for, not merely nonzero. A *strong* Kinetics score
+can still corroborate a call the direct checks alone wouldn't quite make -
+the fix narrows the override, it doesn't remove it.
+
 ## Running locally
 
 ```bash
