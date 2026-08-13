@@ -106,6 +106,21 @@ selection, frames are processed in the normal 0..N order seeded by the
 default heuristic (largest person in frame 0), same as before this
 feature existed.
 
+Frame-to-frame continuity (`_pick_primary_player`) is otherwise pure
+nearest-neighbor: whoever's detected closest to the last known position
+wins. That's fragile across any gap in detecting the selected player
+(occlusion, fast motion, a missed frame) - a real clip logged a
+6.9-body-diagonal "jump" in a single window, i.e. the tracker silently
+locking onto a *different* person, after which everything downstream
+(action labels, dominant hand, narrative order) reflected the wrong
+player. `MAX_PLAUSIBLE_TRACKING_JUMP` caps how far a "nearest" match is
+trusted to still be the same person; past that, the frame is treated as
+"no detection" (position stays frozen at the last good one) rather than
+snapping to someone else. It's a deliberately generous cap tuned against
+that one clip, not a validated threshold - tighten it
+(`tracking_debug_stats`'s `implausible_jumps_rejected`/`max_jump_seen`,
+logged per run) if wrong-person jumps still slip through on other footage.
+
 ## Running locally
 
 ```bash

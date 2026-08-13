@@ -52,14 +52,39 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[float], None]
 
 
+# Maximum plausible displacement (in the *candidate* detection's own
+# bbox-diagonal units) between one analyzed frame and the next for this to
+# plausibly still be the same physical player. Real motion between samples
+# a fraction of a second apart rarely covers more than one or two body
+# lengths; a real clip logged a 6.9-diagonal "jump" in a single window,
+# which is a different person, not continued tracking - accepting it
+# meant everything downstream (which action, which hand, the narrative
+# order) reflected the wrong player from that point on. Treating an
+# implausibly-far "nearest" match as "no detection this frame" instead
+# (previous_center stays frozen at the last good position rather than
+# snapping to someone else) is a deliberately generous cap, not a tight
+# one - tune down if wrong-person jumps still slip through.
+MAX_PLAUSIBLE_TRACKING_JUMP = 3.0
+
+
 def _pick_primary_player(
-    people: list[Detection], previous_center: tuple[float, float] | None
+    people: list[Detection],
+    previous_center: tuple[float, float] | None,
+    stats: dict | None = None,
 ) -> Detection | None:
     if not people:
         return None
     if previous_center is None:
         return max(people, key=lambda d: bbox_diag(d.box))
-    return min(people, key=lambda d: euclidean(bbox_center(d.box), previous_center))
+    nearest = min(people, key=lambda d: euclidean(bbox_center(d.box), previous_center))
+    scale = bbox_diag(nearest.box) or 1.0
+    jump = euclidean(bbox_center(nearest.box), previous_center) / scale
+    if jump > MAX_PLAUSIBLE_TRACKING_JUMP:
+        if stats is not None:
+            stats["implausible_jumps_rejected"] += 1
+            stats["max_jump_seen"] = max(stats["max_jump_seen"], jump)
+        return None
+    return nearest
 
 
 def _pick_ball(balls: list[Detection], player_center: tuple[float, float] | None) -> Detection | None:
@@ -239,12 +264,13 @@ def run_pipeline(
         "closest_dist_min": float("inf"),
     }
     hand_votes: dict[str, int] = {"left": 0, "right": 0}
+    tracking_debug_stats = {"implausible_jumps_rejected": 0, "max_jump_seen": 0.0}
     processed_count = 0
 
     def process_index(i: int, previous_center: tuple[float, float] | None) -> tuple[float, float] | None:
         frame = frames[i]
         balls, people = detection_model.detect_ball_and_players(frame.image)
-        player = _pick_primary_player(people, previous_center)
+        player = _pick_primary_player(people, previous_center, tracking_debug_stats)
         ball = _pick_ball(balls, bbox_center(player.box) if player else None)
 
         wrist_above_shoulder = None
@@ -297,8 +323,9 @@ def run_pipeline(
             report_frame_progress()
 
     logger.info(
-        "Player selection: %s. Dribbling-hand debug: %d frames total, %s, votes=%s",
+        "Player selection: %s. Tracking debug: %s. Dribbling-hand debug: %d frames total, %s, votes=%s",
         "tapped player" if player_selected else "default heuristic",
+        tracking_debug_stats,
         len(frames),
         hand_debug_stats,
         hand_votes,
