@@ -106,20 +106,39 @@ selection, frames are processed in the normal 0..N order seeded by the
 default heuristic (largest person in frame 0), same as before this
 feature existed.
 
-Frame-to-frame continuity (`_pick_primary_player`) is otherwise pure
-nearest-neighbor: whoever's detected closest to the last known position
-wins. That's fragile across any gap in detecting the selected player
-(occlusion, fast motion, a missed frame) - a real clip logged a
-6.9-body-diagonal "jump" in a single window, i.e. the tracker silently
-locking onto a *different* person, after which everything downstream
-(action labels, dominant hand, narrative order) reflected the wrong
-player. `MAX_PLAUSIBLE_TRACKING_JUMP` caps how far a "nearest" match is
-trusted to still be the same person; past that, the frame is treated as
-"no detection" (position stays frozen at the last good one) rather than
-snapping to someone else. It's a deliberately generous cap tuned against
-that one clip, not a validated threshold - tighten it
-(`tracking_debug_stats`'s `implausible_jumps_rejected`/`max_jump_seen`,
-logged per run) if wrong-person jumps still slip through on other footage.
+Frame-to-frame continuity (`_pick_primary_player`) is otherwise nearest-
+neighbor by position, with two layers of protection against tracking the
+wrong physical person - both found from a real clip's logs, in order:
+
+1. **`MAX_PLAUSIBLE_TRACKING_JUMP`** rejects a "nearest" match that's
+   implausibly far from the last known position (occlusion, a missed
+   detection, a fast cut), treating that frame as "no detection" (position
+   stays frozen) instead of snapping onto someone else. This alone turned
+   out to be insufficient: a real clip's `Segments:` log showed a narrative
+   claiming one player passed the ball and then immediately took a shot -
+   impossible in basketball, and a tell that tracking had drifted onto a
+   different person - yet `tracking_debug_stats` showed
+   `implausible_jumps_rejected: 0`. The drift was *gradual*: several
+   individually-small per-frame steps (each under the cap) that added up
+   to a large net displacement across a window, most likely because two
+   players were near each other and position alone couldn't tell them
+   apart.
+2. **Appearance disambiguation**: when *multiple* detections are all
+   within the jump cap of the last known position (the ambiguous case
+   position can't resolve), `_pick_primary_player` breaks the tie with an
+   HSV color-histogram comparison (`_color_histogram`/
+   `_appearance_similarity`) against a reference signature captured once,
+   from whichever frame first successfully tracks the player. This is a
+   cheap, local tie-breaker (a few dozen players' worth of jersey/skin
+   color, not a trained re-identification model) - it won't help if two
+   players are dressed identically, but directly targets the "two people
+   close together" case position-only tracking structurally cannot solve.
+
+Both are deliberately tuned against one real clip's evidence rather than a
+validated dataset; `tracking_debug_stats` (logged per run:
+`implausible_jumps_rejected`, `max_jump_seen`,
+`ambiguous_frames_disambiguated_by_appearance`) is there to check whether
+either layer needs retuning on other footage.
 
 ## Running locally
 

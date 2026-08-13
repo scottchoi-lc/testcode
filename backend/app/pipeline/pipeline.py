@@ -37,6 +37,9 @@ from __future__ import annotations
 import logging
 from typing import Callable
 
+import cv2
+import numpy as np
+
 from app.config import settings
 from app.models.action_classifier import get_action_classifier
 from app.models.detection import Detection, get_detection_model
@@ -67,24 +70,74 @@ ProgressCallback = Callable[[float], None]
 MAX_PLAUSIBLE_TRACKING_JUMP = 3.0
 
 
+def _color_histogram(image_bgr: np.ndarray, box: tuple[float, float, float, float]):
+    """A cheap appearance signature for a person crop (HSV color histogram).
+
+    Used to disambiguate when *multiple* detections are all within
+    MAX_PLAUSIBLE_TRACKING_JUMP of the last known position - e.g. two
+    players standing/moving near each other - which position alone cannot
+    tell apart (that's how tracking silently drifted from a passer onto a
+    nearby receiver in a real clip: each single-frame step was individually
+    "plausible" by distance, so the jump cap never fired). Not a general
+    re-identification model and not robust to major lighting/angle changes
+    across a whole clip - it's a local tie-breaker, not a global identity
+    check.
+    """
+    x1, y1, x2, y2 = (int(round(v)) for v in box)
+    height, width = image_bgr.shape[:2]
+    x1, y1 = max(0, x1), max(0, y1)
+    x2, y2 = min(width, x2), min(height, y2)
+    if x2 - x1 < 4 or y2 - y1 < 4:
+        return None
+    crop = image_bgr[y1:y2, x1:x2]
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [30, 32], [0, 180, 0, 256])
+    cv2.normalize(hist, hist, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    return hist
+
+
+def _appearance_similarity(reference, candidate) -> float:
+    """Higher is more similar. 0.0 (treated as "no signal") if either
+    histogram is unavailable, rather than favoring or penalizing a
+    candidate we simply couldn't compute a signature for."""
+    if reference is None or candidate is None:
+        return 0.0
+    return float(cv2.compareHist(reference, candidate, cv2.HISTCMP_CORREL))
+
+
 def _pick_primary_player(
     people: list[Detection],
     previous_center: tuple[float, float] | None,
+    image_bgr: np.ndarray | None = None,
+    reference_appearance=None,
     stats: dict | None = None,
 ) -> Detection | None:
     if not people:
         return None
     if previous_center is None:
         return max(people, key=lambda d: bbox_diag(d.box))
-    nearest = min(people, key=lambda d: euclidean(bbox_center(d.box), previous_center))
-    scale = bbox_diag(nearest.box) or 1.0
-    jump = euclidean(bbox_center(nearest.box), previous_center) / scale
-    if jump > MAX_PLAUSIBLE_TRACKING_JUMP:
+
+    def jump_for(d: Detection) -> float:
+        scale = bbox_diag(d.box) or 1.0
+        return euclidean(bbox_center(d.box), previous_center) / scale
+
+    plausible = [d for d in people if jump_for(d) <= MAX_PLAUSIBLE_TRACKING_JUMP]
+    if not plausible:
         if stats is not None:
+            nearest = min(people, key=jump_for)
             stats["implausible_jumps_rejected"] += 1
-            stats["max_jump_seen"] = max(stats["max_jump_seen"], jump)
+            stats["max_jump_seen"] = max(stats["max_jump_seen"], jump_for(nearest))
         return None
-    return nearest
+
+    if len(plausible) == 1 or image_bgr is None or reference_appearance is None:
+        return min(plausible, key=jump_for)
+
+    if stats is not None:
+        stats["ambiguous_frames_disambiguated_by_appearance"] += 1
+    return max(
+        plausible,
+        key=lambda d: _appearance_similarity(reference_appearance, _color_histogram(image_bgr, d.box)),
+    )
 
 
 def _pick_ball(balls: list[Detection], player_center: tuple[float, float] | None) -> Detection | None:
@@ -264,13 +317,28 @@ def run_pipeline(
         "closest_dist_min": float("inf"),
     }
     hand_votes: dict[str, int] = {"left": 0, "right": 0}
-    tracking_debug_stats = {"implausible_jumps_rejected": 0, "max_jump_seen": 0.0}
+    tracking_debug_stats = {
+        "implausible_jumps_rejected": 0,
+        "max_jump_seen": 0.0,
+        "ambiguous_frames_disambiguated_by_appearance": 0,
+    }
+    # Appearance signature of the tracked player, established from whichever
+    # frame first successfully picks one (the seed frame itself when a
+    # player was selected, since forward_order starts there; otherwise
+    # frame 0's largest-bbox pick) - see _pick_primary_player.
+    tracking_state = {"reference_appearance": None}
     processed_count = 0
 
     def process_index(i: int, previous_center: tuple[float, float] | None) -> tuple[float, float] | None:
         frame = frames[i]
         balls, people = detection_model.detect_ball_and_players(frame.image)
-        player = _pick_primary_player(people, previous_center, tracking_debug_stats)
+        player = _pick_primary_player(
+            people,
+            previous_center,
+            frame.image,
+            tracking_state["reference_appearance"],
+            tracking_debug_stats,
+        )
         ball = _pick_ball(balls, bbox_center(player.box) if player else None)
 
         wrist_above_shoulder = None
@@ -280,6 +348,8 @@ def run_pipeline(
         if player is not None:
             hand_debug_stats["frames_with_player"] += 1
             new_previous_center = bbox_center(player.box)
+            if tracking_state["reference_appearance"] is None:
+                tracking_state["reference_appearance"] = _color_histogram(frame.image, player.box)
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
             dribbling_hand, ball_wrist_distance = _wrist_ball_signal(

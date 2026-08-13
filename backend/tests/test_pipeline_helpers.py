@@ -1,7 +1,14 @@
 """Unit tests for pure-logic helpers in app.pipeline.pipeline. No models,
 no video I/O - these only need numpy/opencv importable (see README)."""
+import numpy as np
+
 from app.models.detection import Detection
-from app.pipeline.pipeline import _bidirectional_frame_order, _nearest_kinetics_labels, _pick_primary_player
+from app.pipeline.pipeline import (
+    _bidirectional_frame_order,
+    _color_histogram,
+    _nearest_kinetics_labels,
+    _pick_primary_player,
+)
 
 
 def test_nearest_kinetics_labels_picks_closest_midpoint():
@@ -76,3 +83,65 @@ def test_pick_primary_player_records_rejection_stats():
     assert result is None
     assert stats["implausible_jumps_rejected"] == 1
     assert stats["max_jump_seen"] > 3.0
+
+
+def _solid_color_image(colors_and_boxes, size=200):
+    image = np.zeros((size, size, 3), dtype=np.uint8)
+    for color, box in colors_and_boxes:
+        x1, y1, x2, y2 = (int(v) for v in box)
+        image[y1:y2, x1:x2] = color
+    return image
+
+
+def test_pick_primary_player_disambiguates_ambiguous_candidates_by_appearance():
+    # Two players near each other: both within MAX_PLAUSIBLE_TRACKING_JUMP of
+    # previous_center, so position alone can't tell them apart - this is the
+    # exact scenario that let tracking silently drift from a passer onto a
+    # nearby receiver in a real clip. blue_box is the closer of the two by
+    # raw distance, but the reference appearance matches red_box; appearance
+    # should win over "merely closer".
+    red_box = (10, 10, 40, 40)
+    blue_box = (20, 20, 50, 50)
+    image = _solid_color_image([((0, 0, 255), red_box), ((255, 0, 0), blue_box)])  # BGR: red, blue
+
+    red_person = _person(red_box)
+    blue_person = _person(blue_box)
+    previous_center = (28.0, 28.0)  # closer to blue_box's center (35, 35) than red's (25, 25)
+
+    reference = _color_histogram(image, red_box)
+    result = _pick_primary_player(
+        [red_person, blue_person], previous_center, image_bgr=image, reference_appearance=reference
+    )
+    assert result is red_person
+
+
+def test_pick_primary_player_records_disambiguation_stat():
+    red_box = (10, 10, 40, 40)
+    blue_box = (20, 20, 50, 50)
+    image = _solid_color_image([((0, 0, 255), red_box), ((255, 0, 0), blue_box)])
+    reference = _color_histogram(image, red_box)
+    stats = {
+        "implausible_jumps_rejected": 0,
+        "max_jump_seen": 0.0,
+        "ambiguous_frames_disambiguated_by_appearance": 0,
+    }
+    _pick_primary_player(
+        [_person(red_box), _person(blue_box)],
+        previous_center=(28.0, 28.0),
+        image_bgr=image,
+        reference_appearance=reference,
+        stats=stats,
+    )
+    assert stats["ambiguous_frames_disambiguated_by_appearance"] == 1
+
+
+def test_pick_primary_player_falls_back_to_nearest_without_appearance_signal():
+    # Same ambiguous setup, but no reference appearance provided (e.g. it
+    # couldn't be computed) - falls back to plain nearest-by-position rather
+    # than crashing or picking arbitrarily.
+    red_box = (10, 10, 40, 40)
+    blue_box = (20, 20, 50, 50)
+    result = _pick_primary_player(
+        [_person(red_box), _person(blue_box)], previous_center=(28.0, 28.0)
+    )
+    assert result is not None
