@@ -4,7 +4,7 @@ from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segm
 from app.schemas import ActionLabel
 
 
-def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None):
+def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None, wrist_dist=None):
     return FrameSignals(
         timestamp=t,
         player_center=player,
@@ -12,6 +12,7 @@ def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None):
         ball_player_distance=dist,
         wrist_above_shoulder=wrist_high,
         dribbling_hand=hand,
+        ball_wrist_distance=wrist_dist,
     )
 
 
@@ -51,6 +52,23 @@ def test_passing_detected_from_lateral_release_without_shooting_motion():
     result = score_window(window)
     assert result.label == ActionLabel.PASSING
     assert result.confidence > 0.4
+
+
+def test_dribbling_detected_via_wrist_distance_despite_far_bbox_center():
+    # Extended-arm dribble: the ball is far from the player's bbox *center*
+    # (dist=1.2, above BALL_POSSESSION_MAX_DIST=0.9) every frame, which alone
+    # would read as no-possession, but the wrist is right on the ball
+    # (wrist_dist=0.1) - the tighter signal should win and still call this
+    # dribbling rather than moving_without_ball/idle.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.9, 0.7), dist=1.2, wrist_dist=0.1),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.9, 0.9), dist=1.2, wrist_dist=0.1),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.9, 0.7), dist=1.2, wrist_dist=0.1),
+        _frame(0.6, player=(0.5, 0.5), ball=(0.9, 0.9), dist=1.2, wrist_dist=0.1),
+    ]
+    window = WindowSignals(0.0, 0.6, frames)
+    result = score_window(window)
+    assert result.label == ActionLabel.DRIBBLING
 
 
 def test_moving_without_ball_when_no_possession_but_player_displaces():

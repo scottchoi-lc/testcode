@@ -33,6 +33,13 @@ data wasn't available/confident enough). ViTPose's left/right keypoint
 labels are anatomical (the *player's* left/right), not image-left/right, so
 this is correct regardless of camera angle.
 
+The main possession signal (`fraction_possessed` in `fusion.py`) also uses
+this wrist-to-ball distance, not just ball-to-player-bbox-center distance:
+an extended-arm dribble or pass keeps the ball away from the torso center
+even while a wrist has it in hand, so bbox-center distance alone
+under-detects possession in exactly that case. `_effective_ball_distance()`
+takes whichever of the two signals is smaller per frame.
+
 This is a heuristic, best-effort system, not a validated basketball-specific
 classifier — see "Improving accuracy" below for the natural next step
 (fine-tuning a dedicated model on labeled basketball footage). Jersey-number

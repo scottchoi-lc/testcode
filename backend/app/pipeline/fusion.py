@@ -40,11 +40,6 @@ DRIBBLE_VERTICAL_STD_MAX = 0.35
 PLAYER_MOVE_MIN_DISPLACEMENT = 0.5
 WRIST_ABOVE_SHOULDER_MARGIN = 0.02
 
-# Wrist-to-ball distance (player-bbox-diagonal units) below which that wrist
-# is considered plausibly in control of the ball, for calling which hand is
-# dribbling. Matches BALL_POSSESSION_MAX_DIST's scale.
-DRIBBLE_HAND_MAX_WRIST_BALL_DIST = 0.9
-
 
 @dataclass
 class FrameSignals:
@@ -55,9 +50,10 @@ class FrameSignals:
     timestamp: float
     player_center: tuple[float, float] | None
     ball_center: tuple[float, float] | None
-    ball_player_distance: float | None  # None if either is missing
+    ball_player_distance: float | None  # ball <-> player-bbox-center distance; None if either is missing
     wrist_above_shoulder: bool | None  # None if pose unavailable
     dribbling_hand: str | None = None  # "left" | "right" | None; which wrist is nearest the ball
+    ball_wrist_distance: float | None = None  # ball <-> nearest-wrist distance; None if pose/ball unavailable
 
 
 @dataclass
@@ -85,6 +81,20 @@ def _has_generic_basketball_signal(top_labels: list[tuple[str, float]]) -> float
     return _kinetics_boost(KINETICS_GENERIC_BASKETBALL_LABELS, top_labels)
 
 
+def _effective_ball_distance(f: FrameSignals) -> float | None:
+    """Best available possession-distance signal for a frame: the closer of
+    ball-to-player-bbox-center and ball-to-nearest-wrist, when both exist.
+
+    Bbox-center distance alone under-detects possession for an extended-arm
+    dribble/pass, where the ball sits well away from the torso center even
+    while a wrist has it in hand - wrist distance is a tighter, more direct
+    signal when pose data is available, so we take whichever is smaller
+    rather than relying on bbox-center distance alone.
+    """
+    candidates = [d for d in (f.ball_player_distance, f.ball_wrist_distance) if d is not None]
+    return min(candidates) if candidates else None
+
+
 def score_window(window: WindowSignals) -> ScoredLabel:
     """Classify a single analysis window into one of the four action labels
     (or IDLE when there isn't enough evidence for any of them)."""
@@ -92,7 +102,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     if not frames:
         return ScoredLabel(ActionLabel.IDLE, 0.0, {"reason": "no_frames"})
 
-    distances = [f.ball_player_distance for f in frames if f.ball_player_distance is not None]
+    distances = [d for d in (_effective_ball_distance(f) for f in frames) if d is not None]
     fraction_possessed = (
         sum(1 for d in distances if d <= BALL_POSSESSION_MAX_DIST) / len(distances)
         if distances

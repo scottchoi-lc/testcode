@@ -60,6 +60,7 @@ def _build_frame_signals(
     ball: Detection | None,
     wrist_above_shoulder: bool | None,
     dribbling_hand: str | None = None,
+    ball_wrist_distance: float | None = None,
 ) -> FrameSignals:
     if player is None:
         return FrameSignals(
@@ -69,6 +70,7 @@ def _build_frame_signals(
             ball_player_distance=None,
             wrist_above_shoulder=None,
             dribbling_hand=None,
+            ball_wrist_distance=None,
         )
 
     scale = bbox_diag(player.box) or 1.0
@@ -89,6 +91,7 @@ def _build_frame_signals(
         ball_player_distance=distance_norm,
         wrist_above_shoulder=wrist_above_shoulder,
         dribbling_hand=dribbling_hand,
+        ball_wrist_distance=ball_wrist_distance,
     )
 
 
@@ -108,19 +111,27 @@ def _wrist_above_shoulder(pose_result) -> bool | None:
     return bool(left_high or right_high)
 
 
-def _dribbling_hand(
+def _wrist_ball_signal(
     pose_result,
     ball_box: tuple[float, float, float, float] | None,
     scale: float,
     stats: dict | None = None,
-) -> str | None:
-    """Which wrist is nearest the ball this frame, if close enough to plausibly
-    be controlling it. None if pose/ball data is missing or neither wrist is close.
+) -> tuple[str | None, float | None]:
+    """Returns (closest_hand, min_wrist_ball_distance).
+
+    `closest_hand` names which wrist is nearest the ball this frame, but
+    only when close enough to plausibly be controlling it - it's the signal
+    behind ActionSegment.dominant_hand. `min_wrist_ball_distance` is
+    returned whenever pose+ball data exist regardless of how far apart they
+    are; it feeds `fusion.py`'s possession distance as a tighter alternative
+    to ball-to-player-bbox-center distance (which under-detects possession
+    during an extended-arm dribble/pass, where the ball sits away from the
+    torso center even while a wrist has it in hand).
 
     ViTPose's "left"/"right" keypoint names follow the COCO convention: they
     identify the *subject's* own left/right hand (as an annotator looking at
-    the subject would label it), not image-left/right - so this is correct
-    regardless of which way the player is facing the camera.
+    the subject would label it), not image-left/right - so `closest_hand` is
+    correct regardless of which way the player is facing the camera.
 
     `stats`, if given, is mutated with counters for diagnosing *why* a clip
     isn't producing hand calls (no pose data vs. wrist-to-ball too far, etc).
@@ -130,15 +141,15 @@ def _dribbling_hand(
         stats["frames_with_ball"] += ball_box is not None
 
     if pose_result is None or ball_box is None:
-        return None
+        return None, None
     left_wrist = pose_result.get("left_wrist")
     right_wrist = pose_result.get("right_wrist")
     if not left_wrist or not right_wrist:
         if stats is not None:
             stats["frames_missing_wrist_keypoints"] += 1
-        return None
+        return None, None
 
-    from app.pipeline.fusion import DRIBBLE_HAND_MAX_WRIST_BALL_DIST
+    from app.pipeline.fusion import BALL_POSSESSION_MAX_DIST
 
     ball_center = bbox_center(ball_box)
     left_dist = euclidean((left_wrist[0], left_wrist[1]), ball_center) / scale
@@ -148,9 +159,10 @@ def _dribbling_hand(
     if stats is not None:
         stats["closest_dist_min"] = min(stats["closest_dist_min"], closest)
 
-    if closest > DRIBBLE_HAND_MAX_WRIST_BALL_DIST:
-        return None
-    return "left" if left_dist < right_dist else "right"
+    hand = "left" if left_dist < right_dist else "right"
+    if closest > BALL_POSSESSION_MAX_DIST:
+        return None, closest
+    return hand, closest
 
 
 def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -> AnalysisResult:
@@ -188,12 +200,13 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
 
         wrist_above_shoulder = None
         dribbling_hand = None
+        ball_wrist_distance = None
         if player is not None:
             hand_debug_stats["frames_with_player"] += 1
             previous_center = bbox_center(player.box)
             pose_result = pose_model.estimate(frame.image, player.box)
             wrist_above_shoulder = _wrist_above_shoulder(pose_result)
-            dribbling_hand = _dribbling_hand(
+            dribbling_hand, ball_wrist_distance = _wrist_ball_signal(
                 pose_result, ball.box if ball else None, bbox_diag(player.box) or 1.0, hand_debug_stats
             )
             if dribbling_hand:
@@ -203,7 +216,9 @@ def run_pipeline(video_path: str, progress_cb: ProgressCallback | None = None) -
                 jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
 
         frame_signals.append(
-            _build_frame_signals(frame, player, ball, wrist_above_shoulder, dribbling_hand)
+            _build_frame_signals(
+                frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance
+            )
         )
         report(0.05 + 0.55 * (i + 1) / len(frames))
 
