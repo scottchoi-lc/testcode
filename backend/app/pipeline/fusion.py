@@ -200,6 +200,12 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "fraction_wrist_high": fraction_wrist_high,
                         "ball_released": released,
                         "kinetics_shoot_score": shoot_boost,
+                        # Raw trail behind `released`, which currently reads
+                        # only the single last detected-ball distance - kept
+                        # here so a "released" call driven by one noisy/
+                        # misdetected frame is visible in logs rather than
+                        # indistinguishable from a real sustained release.
+                        "ball_distances": [round(d, 2) for d in distances],
                     },
                 )
             )
@@ -223,6 +229,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "lateral_move": lateral_move,
                         "vertical_move": vertical_move,
                         "fraction_wrist_high": fraction_wrist_high,
+                        "ball_distances": [round(d, 2) for d in distances],
                     },
                 )
             )
