@@ -94,6 +94,17 @@ class WindowSignals:
     end_time: float
     frames: list[FrameSignals]
     kinetics_top_labels: list[tuple[str, float]] = field(default_factory=list)
+    # Whether the ball is back within BALL_POSSESSION_MAX_DIST of the same
+    # tracked player within a short lookahead after this window ends -
+    # computed in pipeline.py from the full clip's frame signals (score_window
+    # only sees this one window's slice, but distinguishing a real release
+    # from a retained-possession move needs to look past the window's edge).
+    # A crossover/hesitation dribble has the same "released, lateral, no
+    # wrist raise" signature the PASSING branch looks for, but the ball
+    # comes straight back into the same player's hands a fraction of a
+    # second later - a real pass to a teammate doesn't boomerang back that
+    # fast, so this is what tells the two apart.
+    ball_returns_to_possession_soon: bool = False
 
 
 @dataclass
@@ -213,12 +224,26 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # --- Passing: player starts with the ball, it leaves possession quickly
     # (released) but *without* the wrist-above-shoulder shooting motion and
     # without a strong shooting signal from the action classifier. Ball
-    # travels laterally more than vertically. ---
+    # travels laterally more than vertically.
+    #
+    # A crossover/hesitation dribble matches this same signature - lateral
+    # ball swing, no wrist raise - since the ball moving wide of the
+    # player's bbox center reads as "released" even though it's still in
+    # the same hand the whole time. `ball_returns_to_possession_soon` is
+    # what actually tells the two apart: a real pass to a teammate doesn't
+    # come back into the passer's hands a fraction of a second later, but a
+    # crossover's ball does (real clip: passer's ball read as released by
+    # t=1.0, then fraction_possessed=0.6 again in the very next window). ---
     if distances and distances[0] <= BALL_POSSESSION_MAX_DIST and len(distances) > 1:
         released = distances[-1] >= BALL_RELEASE_MIN_DIST
         lateral_move = abs(ball_xs[-1] - ball_xs[0]) if len(ball_xs) > 1 else 0.0
         vertical_move = abs(ball_ys[-1] - ball_ys[0]) if len(ball_ys) > 1 else 0.0
-        looks_like_pass = released and fraction_wrist_high < 0.3 and shoot_boost < 0.15
+        looks_like_pass = (
+            released
+            and fraction_wrist_high < 0.3
+            and shoot_boost < 0.15
+            and not window.ball_returns_to_possession_soon
+        )
         if looks_like_pass and lateral_move >= vertical_move:
             confidence = min(1.0, 0.5 + 0.3 * min(1.0, lateral_move) - 0.2 * shoot_boost)
             candidates.append(

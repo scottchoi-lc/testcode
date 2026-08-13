@@ -5,6 +5,7 @@ import numpy as np
 from app.models.detection import Detection
 from app.pipeline.fusion import FrameSignals
 from app.pipeline.pipeline import (
+    _ball_returns_to_possession_soon,
     _bidirectional_frame_order,
     _color_histogram,
     _fusion_window_bounds,
@@ -140,6 +141,40 @@ def test_interpolate_ball_gaps_does_not_bridge_across_untracked_player_frame():
     result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
     assert filled == 0
     assert result[1].ball_center is None
+
+
+def test_ball_returns_to_possession_soon_true_when_close_reading_in_lookahead():
+    # The frame right after the window ends shows the ball back close -
+    # the crossover-dribble case: distance looked "released" by the end of
+    # the previous window, but it's back in the same player's hands almost
+    # immediately.
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+        _fs(0.2, player=(0.0, 0.0), ball=(0.1, 0.0), dist=0.1),
+    ]
+    assert _ball_returns_to_possession_soon(frame_signals, end_idx=1, lookahead_frames=1) is True
+
+
+def test_ball_returns_to_possession_soon_false_when_ball_stays_away():
+    # A real pass/shot: the ball stays far for the whole lookahead window.
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+        _fs(0.2, player=(0.0, 0.0), ball=(2.5, 0.0), dist=2.5),
+    ]
+    assert _ball_returns_to_possession_soon(frame_signals, end_idx=1, lookahead_frames=1) is False
+
+
+def test_ball_returns_to_possession_soon_false_when_lookahead_runs_past_clip_end():
+    frame_signals = [_fs(0.0, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0)]
+    assert _ball_returns_to_possession_soon(frame_signals, end_idx=5, lookahead_frames=3) is False
+
+
+def test_ball_returns_to_possession_soon_skips_frames_with_no_ball_detected():
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.2, player=(0.0, 0.0), ball=(0.1, 0.0), dist=0.1),
+    ]
+    assert _ball_returns_to_possession_soon(frame_signals, end_idx=0, lookahead_frames=2) is True
 
 
 def _person(box, score=0.9):

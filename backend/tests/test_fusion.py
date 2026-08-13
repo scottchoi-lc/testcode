@@ -54,6 +54,27 @@ def test_passing_detected_from_lateral_release_without_shooting_motion():
     assert result.confidence > 0.4
 
 
+def test_crossover_dribble_not_mistaken_for_passing_when_ball_returns_soon():
+    # Real clip: a crossover (ball swings laterally across the body, no
+    # wrist raise) has the exact same signature the PASSING branch looks
+    # for - released, lateral > vertical, no shot motion - which got it
+    # mislabeled as a pass. The tell is what happens right after: a real
+    # pass doesn't come back to the passer's hands a fraction of a second
+    # later, but a crossover's ball does (this is what
+    # ball_returns_to_possession_soon, computed in pipeline.py from frames
+    # beyond this window, is for).
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.9, 0.5), dist=1.7, wrist_high=False),
+        _frame(0.4, player=(0.5, 0.5), ball=(1.3, 0.5), dist=2.2, wrist_high=False),
+    ]
+    window = WindowSignals(
+        0.0, 0.4, frames, kinetics_top_labels=[], ball_returns_to_possession_soon=True
+    )
+    result = score_window(window)
+    assert result.label != ActionLabel.PASSING
+
+
 def test_dribbling_detected_with_low_possession_fraction_from_real_bounce_pattern():
     # Real dribbling spends most of each bounce cycle with the ball in
     # flight, away from the hand - only 1 of 3 detected-ball frames here

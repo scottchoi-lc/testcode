@@ -71,6 +71,17 @@ class Settings:
     # left uninterpolated rather than inventing a fictitious trajectory.
     BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "2"))
 
+    # How far past a fusion window's end to look, when deciding whether a
+    # candidate PASSING window is actually a crossover/hesitation dribble:
+    # both have the same "released, lateral, no wrist raise" signature, but
+    # a crossover's ball comes straight back into the same player's hands a
+    # fraction of a second later while a real pass to a teammate doesn't. A
+    # real clip confirmed this exact case (a crossover scored as passing,
+    # with the ball back in close possession in the very next fusion
+    # window). 0.5s is long enough to catch that quick a return without
+    # being so long it could also swallow a genuine, fast give-and-go.
+    PASSING_RETURN_CHECK_SECONDS: float = float(os.getenv("PASSING_RETURN_CHECK_SECONDS", "0.5"))
+
     # Detection confidence thresholds. Ball is lower than person because a
     # basketball is small, fast-moving, and often motion-blurred - the
     # detector's confidence on real hits tends to run lower than it does for

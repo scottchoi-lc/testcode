@@ -46,7 +46,14 @@ from app.models.action_classifier import get_action_classifier
 from app.models.detection import Detection, get_detection_model
 from app.models.jersey_ocr import JerseyNumberAggregator, get_jersey_number_reader
 from app.models.pose import get_pose_model
-from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
+from app.pipeline.fusion import (
+    BALL_POSSESSION_MAX_DIST,
+    FrameSignals,
+    WindowSignals,
+    _effective_ball_distance,
+    merge_adjacent_segments,
+    score_window,
+)
 from app.pipeline.narration import narrate
 from app.pipeline.video_utils import Frame, bbox_center, bbox_diag, euclidean, extract_frames
 from app.schemas import ActionLabel, AnalysisResult
@@ -394,6 +401,26 @@ def _interpolate_ball_gaps(
     return result, filled
 
 
+def _ball_returns_to_possession_soon(
+    frame_signals: list[FrameSignals | None], end_idx: int, lookahead_frames: int
+) -> bool:
+    """Whether the ball is back within BALL_POSSESSION_MAX_DIST of the
+    tracked player in any of the `lookahead_frames` frames right after
+    `end_idx`. Distinguishes a genuine release (pass or shot - the ball
+    stays away, now with someone else or in the air) from a retained-
+    possession move like a crossover dribble, where the ball swings wide of
+    the player's bbox center and then straight back into close range a
+    fraction of a second later, having never actually left that player's
+    hand."""
+    for f in frame_signals[end_idx : end_idx + lookahead_frames]:
+        if f is None:
+            continue
+        distance = _effective_ball_distance(f)
+        if distance is not None and distance <= BALL_POSSESSION_MAX_DIST:
+            return True
+    return False
+
+
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
@@ -541,6 +568,7 @@ def run_pipeline(
 
     fusion_window_frames = max(3, round(settings.FUSION_WINDOW_SECONDS * settings.ANALYSIS_FPS))
     fusion_stride_frames = max(1, round(settings.FUSION_WINDOW_STRIDE_SECONDS * settings.ANALYSIS_FPS))
+    passing_lookahead_frames = max(1, round(settings.PASSING_RETURN_CHECK_SECONDS * settings.ANALYSIS_FPS))
     scored_windows = []
     fusion_bounds = _fusion_window_bounds(len(frames), fusion_window_frames, fusion_stride_frames)
     for fi, (start_idx, end_idx) in enumerate(fusion_bounds):
@@ -553,6 +581,9 @@ def run_pipeline(
             end_time=window_frames[-1].timestamp,
             frames=window_frame_signals,
             kinetics_top_labels=_nearest_kinetics_labels(kinetics_windows, midpoint),
+            ball_returns_to_possession_soon=_ball_returns_to_possession_soon(
+                frame_signals, end_idx, passing_lookahead_frames
+            ),
         )
         scored = score_window(window)
         scored_windows.append((window, scored))

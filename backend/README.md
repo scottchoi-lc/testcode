@@ -244,6 +244,38 @@ happening with 0 frames filled, the gap is longer than
 that bound or improving detection recall directly (e.g. a lower
 `BALL_SCORE_THRESHOLD`, at the cost of more false-positive ball hits).
 
+### Telling a crossover dribble apart from a pass
+
+The PASSING branch calls a window a pass when the ball is released, moves
+laterally more than vertically, and the wrist never raises (no shooting
+motion). A crossover or hesitation dribble - the ball swinging from one
+hand across the body to the other - has exactly that same signature: it
+reads as "released" because the ball moves well away from the player's
+bbox center, it's almost entirely lateral, and there's no wrist raise. A
+real clip confirmed this: a crossover got scored as a pass, with
+`ball_distances` climbing smoothly from 0.19 to 1.95 over the window -
+genuinely released-looking - and then the ball back in close possession
+(`fraction_possessed: 0.6`) in the very next fusion window, because it
+never actually left the player's hand.
+
+That "comes right back" behavior is the actual tell, so
+`_ball_returns_to_possession_soon` (`pipeline.py`) checks the frames just
+past a window's end - `PASSING_RETURN_CHECK_SECONDS` (0.5s) - for the ball
+being back within `BALL_POSSESSION_MAX_DIST` of the same tracked player. A
+real pass to a teammate doesn't boomerang back to the passer that fast; a
+crossover's does. This needs context beyond a single window's frame slice
+(`score_window` only sees its own `WindowSignals`), so it's computed in
+`pipeline.py` from the full per-clip frame signal array and passed in as
+`WindowSignals.ball_returns_to_possession_soon` - when true, the PASSING
+branch doesn't fire and the window falls through to whatever else the
+evidence supports (typically DRIBBLING, correctly, for a crossover).
+
+Known trade-off: a genuinely fast give-and-go (pass out, immediate pass
+back) would look the same as a crossover under this check and could get
+misread as a retained-possession move instead of two real passes. That's
+accepted as the less common case on casual footage - if it turns out to
+matter, `PASSING_RETURN_CHECK_SECONDS` is the first knob to shorten.
+
 ## Running locally
 
 ```bash
