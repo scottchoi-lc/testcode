@@ -57,6 +57,20 @@ class Settings:
     # contained in at least one window.
     FUSION_WINDOW_STRIDE_SECONDS: float = float(os.getenv("FUSION_WINDOW_STRIDE_SECONDS", "0.4"))
 
+    # Longest run of consecutive ball-detection misses (in sampled frames)
+    # that gets linearly interpolated from the nearest valid reading on
+    # each side, when the player was still tracked throughout. The ball is
+    # the least reliable detection in the pipeline - small, fast, and prone
+    # to motion blur exactly when it matters most (a release mid-flight) -
+    # and a real clip logged a whole fusion window with zero ball
+    # detections right where a pass actually happened, leaving the
+    # passing/shooting heuristics with no position data at all even after
+    # widening the fusion windows to overlap. 2 frames (~0.3s at the
+    # default ANALYSIS_FPS=6) is a brief-miss bound, not a long occlusion
+    # or the ball genuinely leaving the frame - those are intentionally
+    # left uninterpolated rather than inventing a fictitious trajectory.
+    BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "2"))
+
     # Detection confidence thresholds. Ball is lower than person because a
     # basketball is small, fast-moving, and often motion-blurred - the
     # detector's confidence on real hits tends to run lower than it does for

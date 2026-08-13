@@ -212,6 +212,38 @@ dropout, not "detected but far") - if that shows up around a missed
 event, the next step is improving ball-detection recall during fast motion
 rather than further windowing changes.
 
+### Interpolating brief ball-detection gaps
+
+Even after fusion windows overlap (above), a real clip's pass was still
+missed - because the ball wasn't detected in *any* frame of the window
+covering the actual release (`ball_frames_detected: 0`, added as a
+diagnostic field for exactly this). No amount of window-boundary
+adjustment can fix that: there's simply no position data for that stretch
+for `score_window` to reason about. This is a detection-recall gap, not a
+windowing or fusion-logic one - the ball is the least reliable detection
+in the pipeline (small, fast, and most prone to motion blur exactly when
+it's flying across the frame during a release).
+
+`_interpolate_ball_gaps` in `pipeline.py` runs once after per-frame
+tracking finishes, over the whole clip's frame signals: for any run of up
+to `BALL_GAP_INTERPOLATION_MAX_FRAMES` (default 2, ~0.3s at
+`ANALYSIS_FPS=6`) consecutive frames where the player was tracked but the
+ball wasn't detected, it linearly interpolates the ball's position (and
+wrist distance, if available) from the nearest real detection immediately
+before and after the gap. Deliberately conservative: it only fills a gap
+that has a real ball reading on *both* sides (never extrapolates past the
+start/end of a clip or a longer genuine absence), and only when the player
+itself was tracked continuously through the gap (a tracking loss isn't
+papered over with an invented ball position for an unknown player
+location). Longer gaps - the ball genuinely leaving the frame, sustained
+occlusion - are left alone rather than fabricating a multi-second
+trajectory. `"Ball gap interpolation: %d frame(s) filled"` is logged once
+per run so this can be checked against real footage; if a miss is still
+happening with 0 frames filled, the gap is longer than
+`BALL_GAP_INTERPOLATION_MAX_FRAMES` and the next thing to try is raising
+that bound or improving detection recall directly (e.g. a lower
+`BALL_SCORE_THRESHOLD`, at the cost of more false-positive ball hits).
+
 ## Running locally
 
 ```bash

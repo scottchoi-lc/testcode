@@ -35,6 +35,7 @@ Steps:
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Callable
 
 import cv2
@@ -327,6 +328,72 @@ def _fusion_window_bounds(num_frames: int, window_frames: int, stride_frames: in
     return bounds
 
 
+def _interpolate_ball_gaps(
+    frame_signals: list[FrameSignals | None], max_gap_frames: int
+) -> tuple[list[FrameSignals | None], int]:
+    """Linearly interpolate ball position/distance across short runs of
+    consecutive frames where the player was tracked but the ball wasn't
+    detected, bounded by `max_gap_frames` on each side. Returns the filled
+    list and how many frames were interpolated (for logging).
+
+    Only fills a gap when there's a real ball reading immediately before
+    *and* after it (so leading/trailing gaps, or gaps longer than the
+    bound, are left as-is rather than fabricated) and only when the player
+    was tracked the whole way through the gap (so a genuine tracking loss
+    isn't papered over with an invented ball position for a player we
+    don't actually know the location of)."""
+    n = len(frame_signals)
+    result = list(frame_signals)
+    filled = 0
+    i = 0
+    while i < n:
+        f = frame_signals[i]
+        if f is not None and f.player_center is not None and f.ball_center is None:
+            start = i
+            while (
+                i < n
+                and frame_signals[i] is not None
+                and frame_signals[i].player_center is not None
+                and frame_signals[i].ball_center is None
+            ):
+                i += 1
+            end = i
+            gap_len = end - start
+            before = frame_signals[start - 1] if start > 0 else None
+            after = frame_signals[end] if end < n else None
+            if (
+                gap_len <= max_gap_frames
+                and before is not None
+                and after is not None
+                and before.ball_center is not None
+                and after.ball_center is not None
+            ):
+                for k in range(gap_len):
+                    t = (k + 1) / (gap_len + 1)
+                    idx = start + k
+                    orig = frame_signals[idx]
+                    ball_center = (
+                        before.ball_center[0] + (after.ball_center[0] - before.ball_center[0]) * t,
+                        before.ball_center[1] + (after.ball_center[1] - before.ball_center[1]) * t,
+                    )
+                    ball_wrist_distance = None
+                    if before.ball_wrist_distance is not None and after.ball_wrist_distance is not None:
+                        ball_wrist_distance = (
+                            before.ball_wrist_distance
+                            + (after.ball_wrist_distance - before.ball_wrist_distance) * t
+                        )
+                    result[idx] = replace(
+                        orig,
+                        ball_center=ball_center,
+                        ball_player_distance=euclidean(orig.player_center, ball_center),
+                        ball_wrist_distance=ball_wrist_distance,
+                    )
+                    filled += 1
+        else:
+            i += 1
+    return result, filled
+
+
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
@@ -441,6 +508,15 @@ def run_pipeline(
         len(frames),
         hand_debug_stats,
         hand_votes,
+    )
+
+    frame_signals, ball_gap_frames_filled = _interpolate_ball_gaps(
+        frame_signals, settings.BALL_GAP_INTERPOLATION_MAX_FRAMES
+    )
+    logger.info(
+        "Ball gap interpolation: %d frame(s) filled (max_gap=%d)",
+        ball_gap_frames_filled,
+        settings.BALL_GAP_INTERPOLATION_MAX_FRAMES,
     )
 
     player_number = jersey_votes.best_guess()

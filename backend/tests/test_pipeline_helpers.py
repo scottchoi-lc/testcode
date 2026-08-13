@@ -3,13 +3,25 @@ no video I/O - these only need numpy/opencv importable (see README)."""
 import numpy as np
 
 from app.models.detection import Detection
+from app.pipeline.fusion import FrameSignals
 from app.pipeline.pipeline import (
     _bidirectional_frame_order,
     _color_histogram,
     _fusion_window_bounds,
+    _interpolate_ball_gaps,
     _nearest_kinetics_labels,
     _pick_primary_player,
 )
+
+
+def _fs(t, player=None, ball=None, dist=None):
+    return FrameSignals(
+        timestamp=t,
+        player_center=player,
+        ball_center=ball,
+        ball_player_distance=dist,
+        wrist_above_shoulder=None,
+    )
 
 
 def test_nearest_kinetics_labels_picks_closest_midpoint():
@@ -69,6 +81,65 @@ def test_fusion_window_bounds_overlap_covers_every_boundary():
 
 def test_fusion_window_bounds_drops_windows_shorter_than_two_frames():
     assert _fusion_window_bounds(num_frames=1, window_frames=5, stride_frames=2) == []
+
+
+def test_interpolate_ball_gaps_fills_short_gap_between_known_positions():
+    # Player tracked throughout; ball missing for exactly 1 frame between
+    # two real detections - short enough (<= max_gap_frames=2) to fill.
+    frames = [
+        _fs(0.0, player=(0.0, 0.0), ball=(0.0, 0.0), dist=0.0),
+        _fs(0.2, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.4, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+    ]
+    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    assert filled == 1
+    assert result[1].ball_center == (1.0, 0.0)
+    assert result[1].ball_player_distance == 1.0
+    # Real readings are untouched.
+    assert result[0] is frames[0]
+    assert result[2] is frames[2]
+
+
+def test_interpolate_ball_gaps_leaves_gap_longer_than_bound():
+    frames = [
+        _fs(0.0, player=(0.0, 0.0), ball=(0.0, 0.0), dist=0.0),
+        _fs(0.2, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.4, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.6, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.8, player=(0.0, 0.0), ball=(6.0, 0.0), dist=6.0),
+    ]
+    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    assert filled == 0
+    assert result[1].ball_center is None
+    assert result[2].ball_center is None
+    assert result[3].ball_center is None
+
+
+def test_interpolate_ball_gaps_leaves_gap_without_valid_bounds_on_both_sides():
+    # Leading gap: no real detection before it to interpolate from.
+    frames = [
+        _fs(0.0, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.2, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+    ]
+    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    assert filled == 0
+    assert result[0].ball_center is None
+
+
+def test_interpolate_ball_gaps_does_not_bridge_across_untracked_player_frame():
+    # The gap includes a frame where the player itself wasn't tracked
+    # (player_center=None) - that frame can't anchor an interpolation
+    # (no known ball_center either), so the preceding ball-only miss is
+    # left alone rather than assuming continuity through a tracking loss.
+    frames = [
+        _fs(0.0, player=(0.0, 0.0), ball=(0.0, 0.0), dist=0.0),
+        _fs(0.2, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.4, player=None, ball=None, dist=None),
+        _fs(0.6, player=(0.0, 0.0), ball=(4.0, 0.0), dist=4.0),
+    ]
+    result, filled = _interpolate_ball_gaps(frames, max_gap_frames=2)
+    assert filled == 0
+    assert result[1].ball_center is None
 
 
 def _person(box, score=0.9):
