@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -35,6 +36,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.pipeline.pipeline import run_pipeline  # noqa: E402
 from app.schemas import ActionLabel  # noqa: E402
+
+# run_pipeline logs its per-window/tracking/interpolation detail via
+# logger.info(...) throughout - fine when the app runs under uvicorn (which
+# configures logging itself), but this is a standalone script with no
+# logging configured at all otherwise, so every one of those calls would
+# silently go nowhere. Without this, `grep "Tracking debug" run_log.txt`
+# finds nothing not because tracking is fine, but because the line was
+# never written anywhere - confirmed from a real run where the script's
+# own summary printed correctly (proving the pipeline ran) while the log
+# grep came back completely empty.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 VALID_LABELS = {label.value for label in ActionLabel}
 
