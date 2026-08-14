@@ -271,7 +271,7 @@ it's flying across the frame during a release).
 
 `_interpolate_ball_gaps` in `pipeline.py` runs once after per-frame
 tracking finishes, over the whole clip's frame signals: for any run of up
-to `BALL_GAP_INTERPOLATION_MAX_FRAMES` (default 4, ~0.7s at
+to `BALL_GAP_INTERPOLATION_MAX_FRAMES` (default 8, ~1.3s at
 `ANALYSIS_FPS=6`) consecutive frames where the player was tracked but the
 ball wasn't detected, it linearly interpolates the ball's position (and
 wrist distance, if available) from the nearest real detection immediately
@@ -287,19 +287,31 @@ trajectory.
 The bound started at 2 frames but wasn't enough: a real clip's pass still
 went completely undetected at that setting, confirmed (not guessed) from
 the log line described below rather than inferred from the segments alone.
-Raised to 4 as the evidence-motivated next step. `_interpolate_ball_gaps`
-now returns (and `"Ball gap interpolation: %d frame(s) filled (max_gap=%d),
-longest gap seen=%d frames"` logs) the *actual* longest gap encountered in
-the clip, whether or not it was short enough to fill - this is what makes
-the bound checkable against real footage instead of a guess: "0 filled"
-alone can't tell a 1-frame-too-long miss from a 20-frame one, but
-`longest_ball_gap_frames` can. If a miss still happens and that number
-exceeds `BALL_GAP_INTERPOLATION_MAX_FRAMES`, raise the bound to match (or
-a bit above) it; if raising the bound repeatedly doesn't converge, that's
-the signal to address detection recall directly instead (e.g. a lower
-`BALL_SCORE_THRESHOLD`, at the cost of more false-positive ball hits) -
-a long enough gap starts fabricating more of the ball's real trajectory
-than a straight-line interpolation should be trusted for.
+`_interpolate_ball_gaps` returns (and `"Ball gap interpolation: %d frame(s)
+filled (max_gap=%d), longest gap seen=%d frames"` logs) the *actual*
+longest gap encountered in the clip, whether or not it was short enough to
+fill - this is what makes the bound checkable against real footage
+instead of a guess: "0 filled" alone can't tell a 1-frame-too-long miss
+from a 20-frame one, but `longest_ball_gap_frames` can.
+
+Raised to 4, then to 8 - both evidence-motivated from that log line, not
+re-guesses. The second raise came after ruling out "wrong player tracked"
+as the cause (a separate bug, fixed by seeding tracking from a tapped
+player rather than the default heuristic - see "Focusing on a specific
+player" above): with the *correct* player confirmed tracked, the same
+clip's actual release still logged `longest gap seen=8 frames`. That's
+real ball detection dropout, not a tracking artifact - consistent with the
+mechanical expectation that a release is exactly when the ball moves
+fastest, and therefore exactly when motion blur is most likely to defeat
+the detector.
+
+8 frames (~1.3s) is a real stretch to trust a straight-line interpolation
+for - if `longest_ball_gap_frames` still exceeds this bound on a future
+clip, that's the signal to stop raising it and address detection recall
+directly instead (e.g. a lower `BALL_SCORE_THRESHOLD`, at the cost of more
+false-positive ball hits), rather than keep widening a window that's
+already covering more of the ball's real trajectory than a straight line
+can respect.
 
 ### Telling a crossover dribble apart from a pass
 

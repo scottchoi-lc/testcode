@@ -107,14 +107,23 @@ class Settings:
     # frames each), meaning the actual gap ran longer than 2 consecutive
     # frames, confirmed directly by pipeline.py's "Ball gap interpolation:
     # ... longest gap seen=N frames" log line rather than inferred. Raised
-    # to 4 (~0.7s) as a evidence-motivated next step, not a re-guess - if
-    # `longest_ball_gap_frames` in that log still exceeds this bound on a
-    # clip where a release is missed, that's the number to raise it to
-    # next, or the sign to address detection recall directly instead (e.g.
-    # BALL_SCORE_THRESHOLD) rather than keep widening this window, since a
-    # long enough gap starts fabricating more of the trajectory than it's
-    # reasonable to trust a straight-line interpolation for.
-    BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "4"))
+    # to 4 (~0.7s), then to 8 (~1.3s) - both evidence-motivated, not
+    # re-guesses: with tracking correctly locked onto the labeled player
+    # (ruling out "wrong player" as the cause), the same clip's actual
+    # release still logged longest gap seen=8 frames, straight ball
+    # detection dropout during the fastest part of the motion (matches the
+    # mechanical expectation - the release is exactly when the ball moves
+    # fastest, so it's exactly when motion blur is most likely to defeat
+    # the detector).
+    #
+    # 8 frames (~1.3s) is a real stretch to trust a straight-line
+    # interpolation for - if `longest_ball_gap_frames` still exceeds this
+    # bound on a future clip, that's the signal to stop raising it and
+    # address detection recall directly instead (e.g. BALL_SCORE_THRESHOLD,
+    # or reconsidering the detection model), rather than keep widening a
+    # window that's already covering more of the ball's real trajectory
+    # than a straight line can respect.
+    BALL_GAP_INTERPOLATION_MAX_FRAMES: int = int(os.getenv("BALL_GAP_INTERPOLATION_MAX_FRAMES", "8"))
 
     # How far past a fusion window's end to look, when deciding whether a
     # candidate PASSING window is actually a crossover/hesitation dribble:
