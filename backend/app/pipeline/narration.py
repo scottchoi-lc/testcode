@@ -42,6 +42,15 @@ def _should_mention(segment: ActionSegment) -> bool:
 def _verb_phrase(segment: ActionSegment) -> str:
     if segment.label == ActionLabel.DRIBBLING and segment.dominant_hand:
         return f"dribbled the ball with the {segment.dominant_hand} hand"
+    # `nearby_other_player` is best-effort, moment-only evidence (see
+    # fusion.py's PASSING/RECEIVING branches) - whoever else was near the
+    # ball right at the release/arrival, not a tracked identity. Worded to
+    # not imply we know who they are or that it's the same person as any
+    # other mention elsewhere in the narrative.
+    if segment.label == ActionLabel.PASSING and segment.evidence.get("nearby_other_player"):
+        return "passed the ball to a nearby player"
+    if segment.label == ActionLabel.RECEIVING and segment.evidence.get("nearby_other_player"):
+        return "received the ball from a nearby player"
     return _VERB_PHRASES[segment.label]
 
 

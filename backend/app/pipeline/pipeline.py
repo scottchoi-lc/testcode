@@ -186,6 +186,7 @@ def _build_frame_signals(
     wrist_above_shoulder: bool | None,
     dribbling_hand: str | None = None,
     ball_wrist_distance: float | None = None,
+    other_people: list[Detection] | None = None,
 ) -> FrameSignals:
     if player is None:
         return FrameSignals(
@@ -209,6 +210,11 @@ def _build_frame_signals(
         ball_center_norm = (ball_center[0] / scale, ball_center[1] / scale)
         distance_norm = euclidean(player_center, ball_center) / scale
 
+    other_people_centers = []
+    for other in other_people or []:
+        center = bbox_center(other.box)
+        other_people_centers.append((center[0] / scale, center[1] / scale))
+
     return FrameSignals(
         timestamp=frame.timestamp,
         player_center=player_center_norm,
@@ -217,6 +223,7 @@ def _build_frame_signals(
         wrist_above_shoulder=wrist_above_shoulder,
         dribbling_hand=dribbling_hand,
         ball_wrist_distance=ball_wrist_distance,
+        other_people_centers=other_people_centers,
     )
 
 
@@ -517,8 +524,9 @@ def run_pipeline(
             if i % jersey_ocr_stride == 0:
                 jersey_votes.add(jersey_reader.read_crop(frame.image, player.box))
 
+        other_people = [p for p in people if p is not player]
         frame_signals[i] = _build_frame_signals(
-            frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance
+            frame, player, ball, wrist_above_shoulder, dribbling_hand, ball_wrist_distance, other_people
         )
         return new_previous_center
 

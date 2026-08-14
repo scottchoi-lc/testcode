@@ -1,18 +1,21 @@
 """Unit tests for pure-logic helpers in app.pipeline.pipeline. No models,
 no video I/O - these only need numpy/opencv importable (see README)."""
 import numpy as np
+import pytest
 
 from app.models.detection import Detection
 from app.pipeline.fusion import FrameSignals
 from app.pipeline.pipeline import (
     _ball_returns_to_possession_soon,
     _bidirectional_frame_order,
+    _build_frame_signals,
     _color_histogram,
     _fusion_window_bounds,
     _interpolate_ball_gaps,
     _nearest_kinetics_labels,
     _pick_primary_player,
 )
+from app.pipeline.video_utils import Frame
 
 
 def _fs(t, player=None, ball=None, dist=None):
@@ -186,6 +189,35 @@ def test_ball_returns_to_possession_soon_skips_frames_with_no_ball_detected():
 
 def _person(box, score=0.9):
     return Detection(label="person", score=score, box=box)
+
+
+def _frame(t=0.0):
+    return Frame(index=0, timestamp=t, image=np.zeros((1, 1, 3), dtype=np.uint8))
+
+
+def test_build_frame_signals_normalizes_other_people_centers():
+    player = _person((0.0, 0.0, 10.0, 10.0))  # center (5, 5), diag = 10*sqrt(2)
+    other = _person((20.0, 0.0, 30.0, 10.0))  # center (25, 5)
+    scale = (10.0**2 + 10.0**2) ** 0.5
+    signals = _build_frame_signals(
+        _frame(), player, ball=None, wrist_above_shoulder=None, other_people=[other]
+    )
+    assert signals.other_people_centers == [pytest.approx((25.0 / scale, 5.0 / scale))]
+
+
+def test_build_frame_signals_empty_other_people_by_default():
+    player = _person((0.0, 0.0, 10.0, 10.0))
+    signals = _build_frame_signals(_frame(), player, ball=None, wrist_above_shoulder=None)
+    assert signals.other_people_centers == []
+
+
+def test_build_frame_signals_no_other_people_when_player_untracked():
+    other = _person((20.0, 0.0, 30.0, 10.0))
+    signals = _build_frame_signals(
+        _frame(), player=None, ball=None, wrist_above_shoulder=None, other_people=[other]
+    )
+    assert signals.player_center is None
+    assert signals.other_people_centers == []
 
 
 def test_pick_primary_player_picks_largest_when_no_previous_center():

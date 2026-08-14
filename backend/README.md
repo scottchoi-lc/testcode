@@ -373,6 +373,37 @@ rolling or bouncing past the player without them actually gaining control
 following the same evidence-first pattern as everything else in this
 file - not added speculatively ahead of a real failure.
 
+### Mentioning other players in a pass/reception
+
+The pipeline only ever *tracks* one player - the one selected (or the
+default heuristic's pick) - so it has no persistent notion of who anyone
+else in the frame is, and can't say "passed to Player 2" and have that
+number mean the same physical person the next time they show up. Building
+that would mean tracking every visible player continuously, each with the
+same jump-rejection/appearance-verification machinery the primary player
+already gets - a substantially bigger, riskier lift than what's here now.
+
+What's here instead is best-effort and moment-only:
+`app/models/detection.py`'s object detector already finds every person in
+each sampled frame, not just the tracked one - `other_people` (everyone
+except the tracked player) gets normalized into
+`FrameSignals.other_people_centers` the same way the ball/player positions
+are (`_build_frame_signals` in `pipeline.py`). When PASSING/RECEIVING
+fires, `_has_other_player_near_ball` checks whether anyone else was within
+`BALL_POSSESSION_MAX_DIST` of the ball at the relevant single frame - the
+last frame it was seen for a pass (where it ended up), the first frame for
+a reception (where it came from) - and sets `nearby_other_player` in the
+evidence dict. `narration.py` uses that to say "passed the ball to a
+nearby player" / "received the ball from a nearby player" instead of the
+plain phrasing.
+
+Deliberately worded to not claim an identity: "a nearby player," not
+"Player 2." Two different PASSING segments both flagging
+`nearby_other_player: True` are not necessarily the same physical person -
+there's no tracking connecting them. If that turns out to matter enough to
+be worth the cost, full multi-player tracking (described above) is the
+real fix, not a bigger version of this heuristic.
+
 ## Running locally
 
 ```bash

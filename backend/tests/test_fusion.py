@@ -1,10 +1,20 @@
 """Unit tests for the rule-based fusion logic. Pure Python/numeric inputs -
 no ML models, no network, no GPU required."""
-from app.pipeline.fusion import FrameSignals, WindowSignals, merge_adjacent_segments, score_window
+from app.pipeline.fusion import (
+    FrameSignals,
+    WindowSignals,
+    _first_frame_with_ball,
+    _has_other_player_near_ball,
+    _last_frame_with_ball,
+    merge_adjacent_segments,
+    score_window,
+)
 from app.schemas import ActionLabel
 
 
-def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None, wrist_dist=None):
+def _frame(
+    t, player=None, ball=None, dist=None, wrist_high=None, hand=None, wrist_dist=None, other_people=None
+):
     return FrameSignals(
         timestamp=t,
         player_center=player,
@@ -13,6 +23,7 @@ def _frame(t, player=None, ball=None, dist=None, wrist_high=None, hand=None, wri
         wrist_above_shoulder=wrist_high,
         dribbling_hand=hand,
         ball_wrist_distance=wrist_dist,
+        other_people_centers=other_people or [],
     )
 
 
@@ -54,6 +65,40 @@ def test_passing_detected_from_lateral_release_without_shooting_motion():
     assert result.confidence > 0.4
 
 
+def test_passing_evidence_flags_nearby_other_player_at_final_ball_position():
+    # Someone else detected within BALL_POSSESSION_MAX_DIST of the ball at
+    # the last frame it was seen - best-effort, moment-only evidence the
+    # pass landed near another player, surfaced in narration.py's wording.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.9, 0.5), dist=1.7, wrist_high=False),
+        _frame(
+            0.4,
+            player=(0.5, 0.5),
+            ball=(1.3, 0.5),
+            dist=2.2,
+            wrist_high=False,
+            other_people=[(1.35, 0.55)],  # within 0.9 of the ball at (1.3, 0.5)
+        ),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.PASSING
+    assert result.evidence["nearby_other_player"] is True
+
+
+def test_passing_evidence_no_nearby_other_player_when_none_detected():
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.9, 0.5), dist=1.7, wrist_high=False),
+        _frame(0.4, player=(0.5, 0.5), ball=(1.3, 0.5), dist=2.2, wrist_high=False),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.PASSING
+    assert result.evidence["nearby_other_player"] is False
+
+
 def test_receiving_detected_from_ball_arriving():
     # Mirror image of passing: the ball starts far from the player and
     # ends close - a caught pass (or a loose-ball pickup; the distance
@@ -68,6 +113,68 @@ def test_receiving_detected_from_ball_arriving():
     result = score_window(window)
     assert result.label == ActionLabel.RECEIVING
     assert result.confidence > 0.5
+
+
+def test_receiving_evidence_flags_nearby_other_player_at_first_ball_position():
+    # Someone else detected within BALL_POSSESSION_MAX_DIST of the ball at
+    # the first frame it was seen (before it arrived) - best-effort,
+    # moment-only evidence it came from near another player.
+    frames = [
+        _frame(
+            0.0,
+            player=(0.5, 0.5),
+            ball=(0.5, 0.0),
+            dist=2.0,
+            other_people=[(0.55, 0.05)],  # within 0.9 of the ball at (0.5, 0.0)
+        ),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=1.0),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.RECEIVING
+    assert result.evidence["nearby_other_player"] is True
+
+
+def test_receiving_evidence_no_nearby_other_player_when_none_detected():
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.0), dist=2.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=1.0),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.RECEIVING
+    assert result.evidence["nearby_other_player"] is False
+
+
+def test_has_other_player_near_ball_true_within_threshold():
+    frame = _frame(0.0, ball=(0.5, 0.5), other_people=[(0.9, 0.5)])  # distance 0.4 <= 0.9
+    assert _has_other_player_near_ball(frame) is True
+
+
+def test_has_other_player_near_ball_false_beyond_threshold():
+    frame = _frame(0.0, ball=(0.5, 0.5), other_people=[(2.0, 0.5)])  # distance 1.5 > 0.9
+    assert _has_other_player_near_ball(frame) is False
+
+
+def test_has_other_player_near_ball_false_without_ball_or_frame():
+    assert _has_other_player_near_ball(None) is False
+    assert _has_other_player_near_ball(_frame(0.0, ball=None, other_people=[(0.5, 0.5)])) is False
+    assert _has_other_player_near_ball(_frame(0.0, ball=(0.5, 0.5), other_people=[])) is False
+
+
+def test_last_and_first_frame_with_ball():
+    f0 = _frame(0.0, ball=None)
+    f1 = _frame(0.2, ball=(0.1, 0.1))
+    f2 = _frame(0.4, ball=None)
+    f3 = _frame(0.6, ball=(0.9, 0.9))
+    f4 = _frame(0.8, ball=None)
+    frames = [f0, f1, f2, f3, f4]
+    assert _first_frame_with_ball(frames) is f1
+    assert _last_frame_with_ball(frames) is f3
+    assert _first_frame_with_ball([f0, f2, f4]) is None
+    assert _last_frame_with_ball([f0, f2, f4]) is None
 
 
 def test_receiving_not_triggered_by_weak_kinetics_noise_alone():

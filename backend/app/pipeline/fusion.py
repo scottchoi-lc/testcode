@@ -112,6 +112,14 @@ class FrameSignals:
     wrist_above_shoulder: bool | None  # None if pose unavailable
     dribbling_hand: str | None = None  # "left" | "right" | None; which wrist is nearest the ball
     ball_wrist_distance: float | None = None  # ball <-> nearest-wrist distance; None if pose/ball unavailable
+    # Centers of every *other* detected person in this frame (same
+    # normalized units as ball_center/player_center) - not tracked across
+    # frames or otherwise identified, just "who else was visible here."
+    # Used to say a pass/reception happened near another player, without
+    # claiming to know who they are or that it's the same person from one
+    # event to the next (that would need real multi-player tracking, not
+    # built - see fusion.py's PASSING/RECEIVING branches).
+    other_people_centers: list[tuple[float, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -162,6 +170,35 @@ def _effective_ball_distance(f: FrameSignals) -> float | None:
     """
     candidates = [d for d in (f.ball_player_distance, f.ball_wrist_distance) if d is not None]
     return min(candidates) if candidates else None
+
+
+def _has_other_player_near_ball(frame: FrameSignals | None) -> bool:
+    """Whether some other detected person was within BALL_POSSESSION_MAX_DIST
+    of the ball in this specific frame - best-effort, moment-only evidence
+    that a pass/reception happened near someone else, not an identity claim
+    (no tracking of *which* other player, or whether it's the same person
+    across different events elsewhere in the clip)."""
+    if frame is None or frame.ball_center is None or not frame.other_people_centers:
+        return False
+    bx, by = frame.ball_center
+    return any(
+        ((bx - ox) ** 2 + (by - oy) ** 2) ** 0.5 <= BALL_POSSESSION_MAX_DIST
+        for ox, oy in frame.other_people_centers
+    )
+
+
+def _last_frame_with_ball(frames: list[FrameSignals]) -> FrameSignals | None:
+    for f in reversed(frames):
+        if f.ball_center is not None:
+            return f
+    return None
+
+
+def _first_frame_with_ball(frames: list[FrameSignals]) -> FrameSignals | None:
+    for f in frames:
+        if f.ball_center is not None:
+            return f
+    return None
 
 
 def score_window(window: WindowSignals) -> ScoredLabel:
@@ -291,6 +328,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "fraction_wrist_high": fraction_wrist_high,
                         "kinetics_pass_score": pass_boost,
                         "ball_distances": [round(d, 2) for d in distances],
+                        "nearby_other_player": _has_other_player_near_ball(_last_frame_with_ball(frames)),
                     },
                 )
             )
@@ -329,6 +367,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "ball_caught": caught,
                         "kinetics_receive_score": receive_boost,
                         "ball_distances": [round(d, 2) for d in distances],
+                        "nearby_other_player": _has_other_player_near_ball(_first_frame_with_ball(frames)),
                     },
                 )
             )

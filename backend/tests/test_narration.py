@@ -2,9 +2,14 @@ from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate
 from app.schemas import ActionLabel, ActionSegment
 
 
-def _segment(label, start, end, dominant_hand=None):
+def _segment(label, start, end, dominant_hand=None, evidence=None):
     return ActionSegment(
-        start_time=start, end_time=end, label=label, confidence=0.8, dominant_hand=dominant_hand
+        start_time=start,
+        end_time=end,
+        label=label,
+        confidence=0.8,
+        dominant_hand=dominant_hand,
+        evidence=evidence or {},
     )
 
 
@@ -115,3 +120,29 @@ def test_narrate_uses_neutral_wording_for_receiving():
     result = narrate(segments, summary)
     assert result.startswith("Player 1 received the ball.")
     assert "pass" not in result.lower()
+
+
+def test_narrate_mentions_nearby_player_for_passing_when_flagged():
+    segments = [_segment(ActionLabel.PASSING, 0.0, 0.5, evidence={"nearby_other_player": True})]
+    summary = {"passing": 0.5}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 passed the ball to a nearby player.")
+
+
+def test_narrate_mentions_nearby_player_for_receiving_when_flagged():
+    segments = [_segment(ActionLabel.RECEIVING, 0.0, 0.5, evidence={"nearby_other_player": True})]
+    summary = {"receiving": 0.5}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 received the ball from a nearby player.")
+
+
+def test_narrate_uses_plain_wording_when_no_nearby_player_flagged():
+    # Default evidence (no nearby_other_player key at all, or explicitly
+    # False) falls back to the plain phrasing rather than erroring.
+    segments = [
+        _segment(ActionLabel.PASSING, 0.0, 0.5),
+        _segment(ActionLabel.RECEIVING, 0.5, 1.0, evidence={"nearby_other_player": False}),
+    ]
+    summary = {"passing": 0.5, "receiving": 0.5}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 passed the ball, then received the ball.")
