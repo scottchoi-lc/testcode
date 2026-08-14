@@ -477,7 +477,26 @@ with `--clip`, since they're specific to one clip at a time). Without a
 matching selection, a mismatch might mean the heuristic tracked a
 different player than the one you labeled, not that the fusion logic is
 wrong - worth ruling out before reading too much into a low agreement
-rate.
+rate. This isn't hypothetical: a real run against a multi-player clip
+showed `ambiguous_frames_disambiguated_by_appearance: 47` out of 48
+frames (logged in the `Tracking debug:` line - see "Focusing on a
+specific player" above) - i.e. nearly every frame had several people
+close together, exactly the situation where the default "largest in
+frame 0" heuristic is most likely to lock onto the wrong person for the
+whole clip.
+
+Getting `--selected-box` coordinates normally means going through the
+app's tap-to-select screen, which isn't convenient from the command line -
+`scripts/preview_frame.py` gets you the same information without it:
+
+```bash
+python scripts/preview_frame.py --video ./clips/my_clip.mov --timestamp 2.1
+```
+
+Saves an annotated frame (`preview.jpg` by default) with every detected
+person's box drawn and numbered, and prints each one's `[x1,y1,x2,y2]` -
+open the image, find the number on the player you want, and use that
+box's coordinates as `--selected-box` above.
 
 This alone won't fix anything - it's a diagnostic, not a training step -
 but it's the fastest way to see concretely where the current heuristics
