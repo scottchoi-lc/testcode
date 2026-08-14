@@ -115,6 +115,28 @@ def test_receiving_detected_from_ball_arriving():
     assert result.confidence > 0.5
 
 
+def test_hand_switch_not_mistaken_for_receiving_when_already_possessed_before():
+    # Real clip: a same-player left-to-right hand switch (still dribbling,
+    # the ball never left their hand) scored as RECEIVING, because the ball
+    # swung far enough from the bbox center mid-switch to look like a fresh
+    # arrival by the window's end - the same signature a genuine catch has
+    # (starts far, ends close). ball_was_already_possessed_before (computed
+    # in pipeline.py from frames before this window, mirroring
+    # ball_returns_to_possession_soon's forward-looking check for passing)
+    # is what tells the two apart: the ball was already in this player's
+    # hands moments before, so it can't be a real reception.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.0), dist=2.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=1.0),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2),
+    ]
+    window = WindowSignals(
+        0.0, 0.4, frames, kinetics_top_labels=[], ball_was_already_possessed_before=True
+    )
+    result = score_window(window)
+    assert result.label != ActionLabel.RECEIVING
+
+
 def test_receiving_evidence_flags_nearby_other_player_at_first_ball_position():
     # Someone else detected within BALL_POSSESSION_MAX_DIST of the ball at
     # the first frame it was seen (before it arrived) - best-effort,

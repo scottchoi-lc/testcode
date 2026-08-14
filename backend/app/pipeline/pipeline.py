@@ -438,6 +438,27 @@ def _ball_returns_to_possession_soon(
     return False
 
 
+def _ball_was_already_possessed_before(
+    frame_signals: list[FrameSignals | None], start_idx: int, lookback_frames: int
+) -> bool:
+    """Mirror image of `_ball_returns_to_possession_soon`, looking backward
+    instead of forward: whether the ball was already within
+    BALL_POSSESSION_MAX_DIST of the tracked player in any of the
+    `lookback_frames` frames right before `start_idx`. Distinguishes a
+    genuine reception (the ball actually arriving from elsewhere) from a
+    same-player hand switch/crossover that swings the ball away from the
+    bbox center and back, which otherwise reads as "starts far, ends
+    close" the same way a real catch does."""
+    lookback_start = max(0, start_idx - lookback_frames)
+    for f in frame_signals[lookback_start:start_idx]:
+        if f is None:
+            continue
+        distance = _effective_ball_distance(f)
+        if distance is not None and distance <= BALL_POSSESSION_MAX_DIST:
+            return True
+    return False
+
+
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
@@ -598,6 +619,9 @@ def run_pipeline(
     fusion_window_frames = max(3, round(settings.FUSION_WINDOW_SECONDS * settings.ANALYSIS_FPS))
     fusion_stride_frames = max(1, round(settings.FUSION_WINDOW_STRIDE_SECONDS * settings.ANALYSIS_FPS))
     passing_lookahead_frames = max(1, round(settings.PASSING_RETURN_CHECK_SECONDS * settings.ANALYSIS_FPS))
+    receiving_lookback_frames = max(
+        1, round(settings.RECEIVING_LOOKBACK_CHECK_SECONDS * settings.ANALYSIS_FPS)
+    )
     scored_windows = []
     fusion_bounds = _fusion_window_bounds(len(frames), fusion_window_frames, fusion_stride_frames)
     for fi, (start_idx, end_idx) in enumerate(fusion_bounds):
@@ -612,6 +636,9 @@ def run_pipeline(
             kinetics_top_labels=_nearest_kinetics_labels(kinetics_windows, midpoint),
             ball_returns_to_possession_soon=_ball_returns_to_possession_soon(
                 frame_signals, end_idx, passing_lookahead_frames
+            ),
+            ball_was_already_possessed_before=_ball_was_already_possessed_before(
+                frame_signals, start_idx, receiving_lookback_frames
             ),
         )
         scored = score_window(window)

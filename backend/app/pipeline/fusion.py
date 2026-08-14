@@ -150,6 +150,18 @@ class WindowSignals:
     # second later - a real pass to a teammate doesn't boomerang back that
     # fast, so this is what tells the two apart.
     ball_returns_to_possession_soon: bool = False
+    # Mirror image of ball_returns_to_possession_soon, looking backward
+    # instead of forward: whether the ball was already within
+    # BALL_POSSESSION_MAX_DIST of the same tracked player in the short
+    # stretch right before this window starts. Distinguishes a genuine
+    # reception (the ball actually arriving from elsewhere) from a
+    # same-player hand switch/crossover that happens to swing the ball
+    # away from the bbox center and back - confirmed from a real clip
+    # where a left-to-right hand switch (still the same player, still
+    # dribbling) read as RECEIVING because the ball briefly looked
+    # "not possessed" mid-swing. A real reception doesn't have the ball
+    # already in this player's hands a fraction of a second earlier.
+    ball_was_already_possessed_before: bool = False
 
 
 @dataclass
@@ -355,17 +367,18 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     # optional classifier corroboration via the same KINETICS_OVERRIDE_MIN
     # pattern as every other branch here.
     #
-    # No `ball_returns_to_possession_soon`-style veto yet - that check
-    # exists specifically to rule out a *release* immediately reversing
-    # (a crossover), which isn't the failure mode here. If real footage
-    # turns up a false positive (e.g. the ball merely rolling past the
-    # player without them controlling it), a symmetric "stays possessed
-    # afterward" check would be the analogous fix - not added preemptively
-    # without evidence it's needed, same discipline as every other
-    # threshold in this file. ---
+    # `ball_was_already_possessed_before` is the mirror of PASSING's
+    # `ball_returns_to_possession_soon`: confirmed from a real clip that a
+    # same-player hand switch (left-to-right crossover, still dribbling)
+    # was misread as RECEIVING, because the ball briefly swung far enough
+    # from the bbox center mid-switch to look like it "arrived" by the
+    # window's end. A genuine reception doesn't have the ball already in
+    # this player's hands moments earlier. ---
     if distances and distances[0] > BALL_POSSESSION_MAX_DIST and len(distances) > 1:
         caught = distances[-1] <= BALL_POSSESSION_MAX_DIST
-        looks_like_reception = caught or receive_boost >= KINETICS_OVERRIDE_MIN
+        looks_like_reception = (
+            caught or receive_boost >= KINETICS_OVERRIDE_MIN
+        ) and not window.ball_was_already_possessed_before
         if looks_like_reception:
             confidence = min(
                 1.0, 0.5 + 0.3 * min(1.0, distances[0] / BALL_RELEASE_MIN_DIST) + 0.2 * receive_boost

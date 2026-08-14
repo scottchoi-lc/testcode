@@ -387,14 +387,23 @@ teammate threw it.
 
 This shipped without the kind of refinement PASSING went through this
 session (the crossover-dribble veto, the ball-gap interpolation) because
-there's no real-clip evidence yet of what actually breaks it. The most
-likely analogous failure, by symmetry with passing's `ball_returns_to_
-possession_soon` veto, would be a false positive from the ball merely
-rolling or bouncing past the player without them actually gaining control
-- if that shows up, a mirrored "stays possessed afterward" check
-(confirming the ball doesn't immediately leave again) would be the fix,
-following the same evidence-first pattern as everything else in this
-file - not added speculatively ahead of a real failure.
+there was no real-clip evidence yet of what actually breaks it - that
+evidence showed up soon after: a same-player left-to-right hand switch
+(still dribbling, the ball never left their hand) scored as RECEIVING,
+because the ball swings far enough from the bbox center mid-switch to
+look like a fresh arrival by the window's end - exactly the same false
+positive PASSING had with crossovers, mirrored onto the other branch.
+
+The fix is the exact mirror of `ball_returns_to_possession_soon`, looking
+backward instead of forward: `_ball_was_already_possessed_before`
+(`pipeline.py`) checks the frames just before a window's start -
+`RECEIVING_LOOKBACK_CHECK_SECONDS` (0.5s, same default and reasoning as
+the passing side) - for the ball having already been within
+`BALL_POSSESSION_MAX_DIST` of the tracked player. A genuine reception
+doesn't have the ball already in this player's hands moments earlier; a
+hand switch does. When true, `WindowSignals.ball_was_already_possessed_
+before` vetoes the RECEIVING branch the same way `ball_returns_to_
+possession_soon` vetoes PASSING.
 
 ### Mentioning other players in a pass/reception
 

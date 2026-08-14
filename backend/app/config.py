@@ -136,6 +136,20 @@ class Settings:
     # being so long it could also swallow a genuine, fast give-and-go.
     PASSING_RETURN_CHECK_SECONDS: float = float(os.getenv("PASSING_RETURN_CHECK_SECONDS", "0.5"))
 
+    # Mirror image of PASSING_RETURN_CHECK_SECONDS, looking backward instead
+    # of forward: how far before a candidate RECEIVING window's start to
+    # check whether the ball was already in the tracked player's possession.
+    # A real clip confirmed the analogous false positive on this side too -
+    # a same-player hand switch (left-to-right crossover, still dribbling)
+    # scored as RECEIVING because the ball swung far enough from the bbox
+    # center mid-switch to look like a fresh arrival by the window's end.
+    # Same 0.5s default as the passing check, same reasoning (long enough
+    # to catch a quick hand switch, short enough not to also swallow a
+    # genuine reception that follows soon after some unrelated possession).
+    RECEIVING_LOOKBACK_CHECK_SECONDS: float = float(
+        os.getenv("RECEIVING_LOOKBACK_CHECK_SECONDS", "0.5")
+    )
+
     # Detection confidence thresholds. Ball is lower than person because a
     # basketball is small, fast-moving, and often motion-blurred - the
     # detector's confidence on real hits tends to run lower than it does for

@@ -7,6 +7,7 @@ from app.models.detection import Detection
 from app.pipeline.fusion import FrameSignals
 from app.pipeline.pipeline import (
     _ball_returns_to_possession_soon,
+    _ball_was_already_possessed_before,
     _bidirectional_frame_order,
     _build_frame_signals,
     _color_histogram,
@@ -185,6 +186,40 @@ def test_ball_returns_to_possession_soon_skips_frames_with_no_ball_detected():
         _fs(0.2, player=(0.0, 0.0), ball=(0.1, 0.0), dist=0.1),
     ]
     assert _ball_returns_to_possession_soon(frame_signals, end_idx=0, lookahead_frames=2) is True
+
+
+def test_ball_was_already_possessed_before_true_when_close_reading_in_lookback():
+    # Mirror of the return-soon case: the frame right before the window
+    # starts shows the ball was already close - the hand-switch case,
+    # where a same-player crossover briefly looks like a fresh arrival.
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=(0.1, 0.0), dist=0.1),
+        _fs(0.2, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+    ]
+    assert _ball_was_already_possessed_before(frame_signals, start_idx=1, lookback_frames=1) is True
+
+
+def test_ball_was_already_possessed_before_false_when_ball_was_always_away():
+    # A real reception: the ball wasn't with this player at all beforehand.
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=(2.5, 0.0), dist=2.5),
+        _fs(0.2, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+    ]
+    assert _ball_was_already_possessed_before(frame_signals, start_idx=1, lookback_frames=1) is False
+
+
+def test_ball_was_already_possessed_before_false_when_lookback_runs_before_clip_start():
+    frame_signals = [_fs(0.0, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0)]
+    assert _ball_was_already_possessed_before(frame_signals, start_idx=0, lookback_frames=3) is False
+
+
+def test_ball_was_already_possessed_before_skips_frames_with_no_ball_detected():
+    frame_signals = [
+        _fs(0.0, player=(0.0, 0.0), ball=(0.1, 0.0), dist=0.1),
+        _fs(0.2, player=(0.0, 0.0), ball=None, dist=None),
+        _fs(0.4, player=(0.0, 0.0), ball=(2.0, 0.0), dist=2.0),
+    ]
+    assert _ball_was_already_possessed_before(frame_signals, start_idx=2, lookback_frames=2) is True
 
 
 def _person(box, score=0.9):
