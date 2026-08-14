@@ -16,6 +16,7 @@ _VERB_PHRASES = {
     ActionLabel.DRIBBLING: "dribbled the ball",
     ActionLabel.SHOOTING: "took a shot",
     ActionLabel.PASSING: "passed the ball",
+    ActionLabel.RECEIVING: "received the ball",
     ActionLabel.MOVING_WITHOUT_BALL: "moved without the ball",
     ActionLabel.IDLE: "paused",
 }
@@ -24,6 +25,7 @@ _NOUN_PHRASES = {
     ActionLabel.DRIBBLING: "dribbling",
     ActionLabel.SHOOTING: "shooting",
     ActionLabel.PASSING: "passing",
+    ActionLabel.RECEIVING: "receiving",
     ActionLabel.MOVING_WITHOUT_BALL: "moving without the ball",
     ActionLabel.IDLE: "paused",
 }

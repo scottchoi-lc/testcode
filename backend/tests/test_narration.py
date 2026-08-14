@@ -83,3 +83,15 @@ def test_narrate_omits_hand_when_unknown():
     result = narrate(segments, summary)
     assert result.startswith("The player dribbled the ball for 2.0s")
     assert "hand" not in result
+
+
+def test_narrate_uses_neutral_wording_for_receiving():
+    # Deliberately doesn't say "caught a pass" - the ball-distance signal
+    # behind RECEIVING can't distinguish a caught pass from picking up a
+    # loose ball or grabbing a rebound, so the wording shouldn't presume
+    # a teammate threw it.
+    segments = [_segment(ActionLabel.RECEIVING, 0.0, 1.0)]
+    summary = {"receiving": 1.0}
+    result = narrate(segments, summary)
+    assert result.startswith("The player received the ball for 1.0s")
+    assert "pass" not in result.lower()

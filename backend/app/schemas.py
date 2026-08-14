@@ -11,6 +11,7 @@ class ActionLabel(str, Enum):
     DRIBBLING = "dribbling"
     SHOOTING = "shooting"
     PASSING = "passing"
+    RECEIVING = "receiving"
     MOVING_WITHOUT_BALL = "moving_without_ball"
     IDLE = "idle"
 

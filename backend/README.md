@@ -2,11 +2,11 @@
 
 A FastAPI service that takes a basketball video clip and returns a timeline
 of what the tracked player was doing: **dribbling**, **shooting**,
-**passing**, or **moving without the ball**.
+**passing**, **receiving**, or **moving without the ball**.
 
 ## How it works
 
-There is no single Hugging Face model that classifies exactly these four
+There is no single Hugging Face model that classifies exactly these five
 basketball-specific actions, so the pipeline combines several off-the-shelf
 models with a small rule-based fusion layer:
 
@@ -19,7 +19,7 @@ models with a small rule-based fusion layer:
 
 `app/pipeline/fusion.py` combines ball-to-player distance/trajectory, wrist
 height relative to the shoulder, and the action-classifier label scores into
-one of the four target labels per analysis window (`app/pipeline/pipeline.py`
+one of the five target labels per analysis window (`app/pipeline/pipeline.py`
 orchestrates the whole thing). Adjacent windows with the same label are
 merged into segments with a `start_time`/`end_time`/`confidence`, and
 `app/pipeline/narration.py` turns the merged segments into a plain-English
@@ -332,6 +332,34 @@ back) would look the same as a crossover under this check and could get
 misread as a retained-possession move instead of two real passes. That's
 accepted as the less common case on casual footage - if it turns out to
 matter, `PASSING_RETURN_CHECK_SECONDS` is the first knob to shorten.
+
+### Receiving
+
+RECEIVING is the mirror image of passing/shooting: the player did *not*
+have the ball at the start of a window but does by the end. Detected the
+same way passing is, just inverted - a window that starts with the ball
+farther than `BALL_POSSESSION_MAX_DIST` away and ends with it close
+(`distances[0] > BALL_POSSESSION_MAX_DIST`, `distances[-1] <=
+BALL_POSSESSION_MAX_DIST`) is a reception, optionally corroborated by the
+action classifier's `"catching or receiving a basketball pass"` candidate
+the same `KINETICS_OVERRIDE_MIN` way every other branch here works.
+
+The ball-distance signal alone can't tell a caught pass apart from picking
+up a loose ball or grabbing a rebound - both look identical as "the ball
+went from far to close for this player" - so the narrative deliberately
+uses neutral wording ("received the ball") rather than presuming a
+teammate threw it.
+
+This shipped without the kind of refinement PASSING went through this
+session (the crossover-dribble veto, the ball-gap interpolation) because
+there's no real-clip evidence yet of what actually breaks it. The most
+likely analogous failure, by symmetry with passing's `ball_returns_to_
+possession_soon` veto, would be a false positive from the ball merely
+rolling or bouncing past the player without them actually gaining control
+- if that shows up, a mirrored "stays possessed afterward" check
+(confirming the ball doesn't immediately leave again) would be the fix,
+following the same evidence-first pattern as everything else in this
+file - not added speculatively ahead of a real failure.
 
 ## Running locally
 

@@ -7,6 +7,7 @@ export const LABEL_COLORS: Record<ActionLabel, string> = {
   dribbling: "#3B82F6", // blue
   shooting: "#F97316", // orange
   passing: "#22C55E", // green
+  receiving: "#EAB308", // yellow
   moving_without_ball: "#A855F7", // purple
   idle: "#6B7280", // gray
 };
@@ -15,6 +16,7 @@ export const LABEL_TITLES: Record<ActionLabel, string> = {
   dribbling: "Dribbling",
   shooting: "Shooting",
   passing: "Passing",
+  receiving: "Receiving",
   moving_without_ball: "Moving (no ball)",
   idle: "No clear action",
 };

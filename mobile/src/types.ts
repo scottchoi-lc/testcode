@@ -1,6 +1,12 @@
 // Mirrors backend/app/schemas.py — keep these in sync with the API.
 
-export type ActionLabel = "dribbling" | "shooting" | "passing" | "moving_without_ball" | "idle";
+export type ActionLabel =
+  | "dribbling"
+  | "shooting"
+  | "passing"
+  | "receiving"
+  | "moving_without_ball"
+  | "idle";
 
 export type JobStatus = "queued" | "processing" | "done" | "failed";
 

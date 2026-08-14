@@ -43,6 +43,7 @@ class Settings:
         "dribbling a basketball",
         "shooting a basketball",
         "passing a basketball to a teammate",
+        "catching or receiving a basketball pass",
         "a basketball player moving without the ball",
         "playing basketball",
         "a person doing an activity unrelated to basketball",

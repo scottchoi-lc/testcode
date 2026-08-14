@@ -54,6 +54,55 @@ def test_passing_detected_from_lateral_release_without_shooting_motion():
     assert result.confidence > 0.4
 
 
+def test_receiving_detected_from_ball_arriving():
+    # Mirror image of passing: the ball starts far from the player and
+    # ends close - a caught pass (or a loose-ball pickup; the distance
+    # signal can't tell those apart, which is why the narrative wording
+    # stays neutral rather than presuming a teammate threw it).
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.0), dist=2.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=1.0),
+        _frame(0.4, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2),
+    ]
+    window = WindowSignals(0.0, 0.4, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.RECEIVING
+    assert result.confidence > 0.5
+
+
+def test_receiving_not_triggered_by_weak_kinetics_noise_alone():
+    # Ball starts far and stays far (never actually arrives) - a weak
+    # "catching or receiving" classifier score shouldn't manufacture a
+    # reception on its own, same KINETICS_OVERRIDE_MIN discipline as every
+    # other branch.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.0), dist=2.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.1), dist=1.8),
+    ]
+    window = WindowSignals(
+        0.0, 0.2, frames, kinetics_top_labels=[("catching or receiving a basketball pass", 0.1)]
+    )
+    result = score_window(window)
+    assert result.label != ActionLabel.RECEIVING
+
+
+def test_receiving_corroborated_by_strong_kinetics_score_without_clear_catch():
+    # The ball only closes to dist=1.0 (still above BALL_POSSESSION_MAX_
+    # DIST=0.9), so the direct "caught" check alone wouldn't call this a
+    # reception - but a strong classifier score should be able to
+    # corroborate it, the same way dribble_boost/shoot_boost/pass_boost
+    # can corroborate their branches.
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.0), dist=2.0),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.5, 0.3), dist=1.0),
+    ]
+    window = WindowSignals(
+        0.0, 0.2, frames, kinetics_top_labels=[("catching or receiving a basketball pass", 0.35)]
+    )
+    result = score_window(window)
+    assert result.label == ActionLabel.RECEIVING
+
+
 def test_crossover_dribble_not_mistaken_for_passing_when_ball_returns_soon():
     # Real clip: a crossover (ball swings laterally across the body, no
     # wrist raise) has the exact same signature the PASSING branch looks

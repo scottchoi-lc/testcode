@@ -1,8 +1,8 @@
 # Basketball Movement Analyzer
 
 A mobile app that analyzes a basketball video and breaks down a player's
-movement into **dribbling**, **shooting**, **passing**, and **moving
-without the ball**.
+movement into **dribbling**, **shooting**, **passing**, **receiving**, and
+**moving without the ball**.
 
 ```
 mobile/     Expo (React Native + TypeScript) app: record/upload a clip,
@@ -27,11 +27,11 @@ backend/    FastAPI service: runs the Hugging Face models and the
 ```
 
 There isn't an off-the-shelf Hugging Face model that classifies exactly
-"dribbling vs. shooting vs. passing vs. moving without the ball" for
-basketball, so the backend combines four general-purpose HF models (object
-detection, pose estimation, zero-shot video-text action scoring, OCR) with a
-small, unit-tested rule-based fusion layer specific to this task. All four
-are permissively licensed (Apache-2.0/MIT) — see
+"dribbling vs. shooting vs. passing vs. receiving vs. moving without the
+ball" for basketball, so the backend combines four general-purpose HF
+models (object detection, pose estimation, zero-shot video-text action
+scoring, OCR) with a small, unit-tested rule-based fusion layer specific
+to this task. All four are permissively licensed (Apache-2.0/MIT) — see
 [`backend/README.md`](backend/README.md) for the full breakdown of models
 used, and [`backend/app/pipeline/fusion.py`](backend/app/pipeline/fusion.py)
 for the fusion heuristics themselves — that file is the place to improve

@@ -2,7 +2,8 @@
 
 Expo (React Native + TypeScript) app for recording or picking a basketball
 clip, sending it to the [backend](../backend) for analysis, and displaying
-the resulting dribbling/shooting/passing/moving-without-ball timeline.
+the resulting dribbling/shooting/passing/receiving/moving-without-ball
+timeline.
 
 ## Running locally
 

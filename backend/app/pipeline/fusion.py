@@ -38,10 +38,12 @@ from app.schemas import ActionLabel
 KINETICS_DRIBBLE_LABELS = {"dribbling a basketball"}
 KINETICS_SHOOT_LABELS = {"shooting a basketball"}
 KINETICS_PASS_LABELS = {"passing a basketball to a teammate"}
+KINETICS_RECEIVE_LABELS = {"catching or receiving a basketball pass"}
 KINETICS_GENERIC_BASKETBALL_LABELS = {
     "dribbling a basketball",
     "shooting a basketball",
     "passing a basketball to a teammate",
+    "catching or receiving a basketball pass",
     "a basketball player moving without the ball",
     "playing basketball",
 }
@@ -194,6 +196,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
     dribble_boost = _kinetics_boost(KINETICS_DRIBBLE_LABELS, kinetics_labels)
     shoot_boost = _kinetics_boost(KINETICS_SHOOT_LABELS, kinetics_labels)
     pass_boost = _kinetics_boost(KINETICS_PASS_LABELS, kinetics_labels)
+    receive_boost = _kinetics_boost(KINETICS_RECEIVE_LABELS, kinetics_labels)
     generic_basketball = _has_generic_basketball_signal(kinetics_labels)
 
     candidates: list[ScoredLabel] = []
@@ -287,6 +290,44 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                         "vertical_move": vertical_move,
                         "fraction_wrist_high": fraction_wrist_high,
                         "kinetics_pass_score": pass_boost,
+                        "ball_distances": [round(d, 2) for d in distances],
+                    },
+                )
+            )
+
+    # --- Receiving: the mirror image of passing/shooting - the player did
+    # *not* have the ball at the start of the window but does by the end,
+    # i.e. the ball arrived (a caught pass, or picking up a loose ball/
+    # rebound - the ball-distance signal alone can't tell those apart, so
+    # the narrative wording stays neutral rather than presuming a teammate
+    # threw it). Confidence scales with how far away the ball started
+    # (a bigger far-to-close swing is a clearer "they didn't have it before"
+    # reading, the same role lateral_move plays for passing above), plus
+    # optional classifier corroboration via the same KINETICS_OVERRIDE_MIN
+    # pattern as every other branch here.
+    #
+    # No `ball_returns_to_possession_soon`-style veto yet - that check
+    # exists specifically to rule out a *release* immediately reversing
+    # (a crossover), which isn't the failure mode here. If real footage
+    # turns up a false positive (e.g. the ball merely rolling past the
+    # player without them controlling it), a symmetric "stays possessed
+    # afterward" check would be the analogous fix - not added preemptively
+    # without evidence it's needed, same discipline as every other
+    # threshold in this file. ---
+    if distances and distances[0] > BALL_POSSESSION_MAX_DIST and len(distances) > 1:
+        caught = distances[-1] <= BALL_POSSESSION_MAX_DIST
+        looks_like_reception = caught or receive_boost >= KINETICS_OVERRIDE_MIN
+        if looks_like_reception:
+            confidence = min(
+                1.0, 0.5 + 0.3 * min(1.0, distances[0] / BALL_RELEASE_MIN_DIST) + 0.2 * receive_boost
+            )
+            candidates.append(
+                ScoredLabel(
+                    ActionLabel.RECEIVING,
+                    confidence,
+                    {
+                        "ball_caught": caught,
+                        "kinetics_receive_score": receive_boost,
                         "ball_distances": [round(d, 2) for d in distances],
                     },
                 )

@@ -12,8 +12,8 @@ Usage:
 The CSV format matches the labeling spreadsheet template: one row per
 labeled segment, columns clip_filename,segment_start_sec,segment_end_sec,
 label,dominant_hand,notes. `label` must be one of the ActionLabel values
-(dribbling/shooting/passing/moving_without_ball/idle) - `dominant_hand`
-and `notes` are read but not used by this script yet.
+(dribbling/shooting/passing/receiving/moving_without_ball/idle) -
+`dominant_hand` and `notes` are read but not used by this script yet.
 
 --selected-box/--selected-timestamp seed player tracking the same way
 tapping a player in the app does (same [x1,y1,x2,y2]/seconds format the
