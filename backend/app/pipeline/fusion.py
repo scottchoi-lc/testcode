@@ -391,6 +391,7 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                     # case a wider fusion window can't fix by itself, since
                     # there's no position data to reason about at all).
                     "ball_frames_detected": len(distances),
+                    "ball_distances": [round(d, 2) for d in distances],
                 },
             )
         )
@@ -404,6 +405,14 @@ def score_window(window: WindowSignals) -> ScoredLabel:
                 "player_displacement": player_displacement,
                 "generic_basketball_signal": generic_basketball,
                 "ball_frames_detected": len(distances),
+                # Added specifically to diagnose windows that should have
+                # been a release (PASSING/SHOOTING) or reception
+                # (RECEIVING) but fell through to IDLE instead - without
+                # the raw sequence, fraction_possessed alone can't show
+                # *where* in the window the ball crossed BALL_POSSESSION_
+                # MAX_DIST/BALL_RELEASE_MIN_DIST, which is what determines
+                # whether any candidate branch's conditions were met.
+                "ball_distances": [round(d, 2) for d in distances],
             },
         )
 
