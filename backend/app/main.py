@@ -25,9 +25,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.jobs.store import job_store
 from app.models.detection import get_detection_model
+from app.pipeline.narration import narrate_combined
 from app.pipeline.pipeline import run_pipeline
 from app.pipeline.video_utils import extract_frame_at, probe_video
 from app.schemas import (
+    CombineNarrativeRequest,
+    CombineNarrativeResponse,
     DetectedPersonBox,
     JobResponse,
     JobStatus,
@@ -190,6 +193,20 @@ def analyze(
         _process_job, job.job_id, video_id, str(session.path), box, timestamp
     )
     return JobResponse(job_id=job.job_id, status=job.status, progress=job.progress)
+
+
+@app.post("/combine-narratives", response_model=CombineNarrativeResponse)
+def combine_narratives(request: CombineNarrativeRequest) -> CombineNarrativeResponse:
+    """Merge several already-completed single-player analyses of the same
+    clip (one POST /analyze per player, each seeded by tapping that player)
+    into one chronological "sequence of events" narrative. See
+    `narrate_combined` for why this isn't real multi-player tracking."""
+    players = [
+        (entry.label or f"Player {i}", entry.segments)
+        for i, entry in enumerate(request.players, start=1)
+    ]
+    narrative, segments = narrate_combined(players)
+    return CombineNarrativeResponse(narrative=narrative, segments=segments)
 
 
 @app.get("/jobs/{job_id}", response_model=JobResponse)

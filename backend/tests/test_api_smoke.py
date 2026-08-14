@@ -205,3 +205,70 @@ def test_parse_selected_box_wrong_length():
 
 def test_parse_selected_box_malformed_json():
     assert main_module._parse_selected_box("{not valid") is None
+
+
+def test_combine_narratives_auto_numbers_omitted_labels():
+    client = TestClient(main_module.app)
+    resp = client.post(
+        "/combine-narratives",
+        json={
+            "players": [
+                {
+                    "segments": [
+                        {
+                            "start_time": 0.0,
+                            "end_time": 1.0,
+                            "label": "dribbling",
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+                {
+                    "segments": [
+                        {
+                            "start_time": 1.0,
+                            "end_time": 2.0,
+                            "label": "shooting",
+                            "confidence": 0.9,
+                        }
+                    ]
+                },
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["narrative"] == "Player 1 dribbled the ball. Player 2 took a shot."
+    assert [s["player_label"] for s in body["segments"]] == ["Player 1", "Player 2"]
+
+
+def test_combine_narratives_uses_given_labels():
+    client = TestClient(main_module.app)
+    resp = client.post(
+        "/combine-narratives",
+        json={
+            "players": [
+                {
+                    "label": "Number 23",
+                    "segments": [
+                        {
+                            "start_time": 0.0,
+                            "end_time": 1.0,
+                            "label": "passing",
+                            "confidence": 0.9,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["narrative"] == "Number 23 passed the ball."
+    assert body["segments"][0]["player_label"] == "Number 23"
+
+
+def test_combine_narratives_requires_at_least_one_player():
+    client = TestClient(main_module.app)
+    resp = client.post("/combine-narratives", json={"players": []})
+    assert resp.status_code == 422

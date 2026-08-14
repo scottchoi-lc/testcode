@@ -47,6 +47,16 @@ leaving it to the default "largest person in frame 0" heuristic — see
 `backend/README.md`'s "Focusing on a specific player" for how the
 preview/selection flow and the resulting bidirectional tracking work.
 
+For a clip with several players of interest, you can tap-select and
+analyze each one in turn (the mobile app's "Analyze another player in
+this clip" button), then merge the resulting single-player analyses into
+one chronological "sequence of events" via `POST /combine-narratives` —
+shown in the app alongside the existing single-player "movements of
+[player]" narrative. See `backend/README.md`'s "Combining several
+single-player analyses into one sequence of events" for why this merge
+approach was chosen over real simultaneous multi-player tracking (same-
+jersey teammates defeat appearance-based re-identification).
+
 ## Quickstart
 
 ```bash

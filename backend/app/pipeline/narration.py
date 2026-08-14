@@ -32,6 +32,20 @@ _NOUN_PHRASES = {
 
 NO_ACTIONS_MESSAGE = "No clear basketball actions were detected in this clip."
 
+# For the combined multi-player narrative only (narrate_combined below) -
+# IDLE/MOVING_WITHOUT_BALL are still meaningful in a single player's own
+# narrative (it's the whole story of what they were doing), but once
+# several players' timelines are interleaved, "Player 2 moved without the
+# ball" while Player 1 is dribbling is noise, not signal - a "sequence of
+# events" should only call out who actually had the ball and what they did
+# with it.
+_COMBINED_MENTIONABLE_LABELS = {
+    ActionLabel.DRIBBLING,
+    ActionLabel.SHOOTING,
+    ActionLabel.PASSING,
+    ActionLabel.RECEIVING,
+}
+
 
 def _should_mention(segment: ActionSegment) -> bool:
     if segment.label != ActionLabel.IDLE:
@@ -99,3 +113,62 @@ def narrate(
     if totals:
         narrative = f"{narrative} {totals}"
     return narrative
+
+
+def narrate_combined(players: list[tuple[str, list[ActionSegment]]]) -> tuple[str, list[ActionSegment]]:
+    """Merge several *separate, single-player* analyses of the same clip
+    into one chronological "sequence of events." Not multi-player tracking
+    - each (label, segments) pair came from its own independent POST
+    /analyze call, seeded by tapping one specific player each time (see
+    "Focusing on a specific player" / "Mentioning other players" in
+    backend/README.md for why real simultaneous multi-player tracking
+    isn't built: appearance-based re-identification can't tell same-team
+    players in matching jerseys apart, so tracking each one via an
+    explicit tap - a human doing the identification, not the model - is
+    the reliable alternative). This function's only job is combining
+    already-correct per-player timelines into one shared narrative.
+
+    Returns the narrative text and the merged, chronologically-sorted,
+    player_label-tagged segments it was built from (for a combined
+    timeline UI, not just the text).
+
+    Only DRIBBLING/SHOOTING/PASSING/RECEIVING segments are included - see
+    `_COMBINED_MENTIONABLE_LABELS`. A new sentence starts each time the
+    active player changes; consecutive segments from the same player
+    within one unbroken stretch join with "then", so a give-and-go reads
+    as "Player 1 dribbled the ball, then passed the ball to a nearby
+    player. Player 2 received the ball, then dribbled the ball, then
+    passed the ball to a nearby player. Player 3 received the ball, then
+    took a shot." rather than one run-on sentence or a flat list with no
+    sense of who did what.
+    """
+    tagged: list[ActionSegment] = []
+    for label, segments in players:
+        for segment in segments:
+            if segment.label not in _COMBINED_MENTIONABLE_LABELS:
+                continue
+            tagged.append(segment.model_copy(update={"player_label": label}))
+    tagged.sort(key=lambda s: s.start_time)
+
+    if not tagged:
+        return NO_ACTIONS_MESSAGE, []
+
+    sentences: list[str] = []
+    current_label: str | None = None
+    current_clauses: list[str] = []
+
+    def flush() -> None:
+        if current_clauses:
+            sentences.append(f"{current_label} " + ", then ".join(current_clauses) + ".")
+
+    for segment in tagged:
+        verb = _verb_phrase(segment)
+        if segment.player_label != current_label:
+            flush()
+            current_label = segment.player_label
+            current_clauses = [verb]
+        else:
+            current_clauses.append(verb)
+    flush()
+
+    return " ".join(sentences), tagged

@@ -1,7 +1,14 @@
 import axios from "axios";
 
 import { API_BASE_URL, JOB_POLL_INTERVAL_MS } from "@/config";
-import type { DetectedPersonBox, JobResponse, PreviewFrameResponse, UploadVideoResponse } from "@/types";
+import type {
+  CombineNarrativeRequest,
+  CombineNarrativeResponse,
+  DetectedPersonBox,
+  JobResponse,
+  PreviewFrameResponse,
+  UploadVideoResponse,
+} from "@/types";
 
 const client = axios.create({ baseURL: API_BASE_URL, timeout: 60_000 });
 
@@ -57,6 +64,21 @@ export async function submitVideoForAnalysis(
 
 export async function getJob(jobId: string): Promise<JobResponse> {
   const response = await client.get<JobResponse>(`/jobs/${jobId}`);
+  return response.data;
+}
+
+/**
+ * Merge several already-completed single-player analyses of the same clip
+ * (one per tapped player) into one chronological "sequence of events."
+ * Not multi-player tracking — see backend/README.md's "Combining several
+ * single-player analyses into one sequence of events".
+ */
+export async function combineNarratives(
+  request: CombineNarrativeRequest
+): Promise<CombineNarrativeResponse> {
+  const response = await client.post<CombineNarrativeResponse>("/combine-narratives", request, {
+    timeout: 30_000,
+  });
   return response.data;
 }
 

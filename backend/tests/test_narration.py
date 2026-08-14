@@ -1,4 +1,4 @@
-from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate
+from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate, narrate_combined
 from app.schemas import ActionLabel, ActionSegment
 
 
@@ -146,3 +146,71 @@ def test_narrate_uses_plain_wording_when_no_nearby_player_flagged():
     summary = {"passing": 0.5, "receiving": 0.5}
     result = narrate(segments, summary)
     assert result.startswith("Player 1 passed the ball, then received the ball.")
+
+
+def test_narrate_combined_empty_input_returns_no_actions_message():
+    narrative, segments = narrate_combined([])
+    assert narrative == NO_ACTIONS_MESSAGE
+    assert segments == []
+
+
+def test_narrate_combined_single_player_reads_like_normal_narration():
+    player_segments = [
+        _segment(ActionLabel.DRIBBLING, 0.0, 2.0),
+        _segment(ActionLabel.SHOOTING, 2.0, 2.8),
+    ]
+    narrative, segments = narrate_combined([("Player 1", player_segments)])
+    assert narrative == "Player 1 dribbled the ball, then took a shot."
+    assert [s.player_label for s in segments] == ["Player 1", "Player 1"]
+
+
+def test_narrate_combined_starts_new_sentence_on_player_change():
+    player1 = [
+        _segment(ActionLabel.DRIBBLING, 0.0, 2.0),
+        _segment(ActionLabel.PASSING, 2.0, 2.5),
+    ]
+    player2 = [
+        _segment(ActionLabel.RECEIVING, 2.5, 3.0),
+        _segment(ActionLabel.SHOOTING, 3.0, 3.8),
+    ]
+    narrative, segments = narrate_combined([("Player 1", player1), ("Player 2", player2)])
+    assert narrative == (
+        "Player 1 dribbled the ball, then passed the ball. "
+        "Player 2 received the ball, then took a shot."
+    )
+    assert [s.player_label for s in segments] == [
+        "Player 1",
+        "Player 1",
+        "Player 2",
+        "Player 2",
+    ]
+
+
+def test_narrate_combined_sorts_chronologically_regardless_of_input_order():
+    # Passed in reverse chronological order (player 2's segments come after
+    # player 1's in real time, but appear first in the `players` list) -
+    # the merge should still emit events in time order, not input order.
+    player2 = [_segment(ActionLabel.SHOOTING, 3.0, 3.8)]
+    player1 = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0)]
+    narrative, segments = narrate_combined([("Player 2", player2), ("Player 1", player1)])
+    assert narrative == "Player 1 dribbled the ball. Player 2 took a shot."
+    assert [s.player_label for s in segments] == ["Player 1", "Player 2"]
+
+
+def test_narrate_combined_filters_idle_and_moving_without_ball():
+    player_segments = [
+        _segment(ActionLabel.IDLE, 0.0, 1.0),
+        _segment(ActionLabel.MOVING_WITHOUT_BALL, 1.0, 2.0),
+        _segment(ActionLabel.DRIBBLING, 2.0, 3.0),
+    ]
+    narrative, segments = narrate_combined([("Player 1", player_segments)])
+    assert narrative == "Player 1 dribbled the ball."
+    assert len(segments) == 1
+    assert segments[0].label == ActionLabel.DRIBBLING
+
+
+def test_narrate_combined_all_filtered_out_returns_no_actions_message():
+    player_segments = [_segment(ActionLabel.IDLE, 0.0, 1.0)]
+    narrative, segments = narrate_combined([("Player 1", player_segments)])
+    assert narrative == NO_ACTIONS_MESSAGE
+    assert segments == []

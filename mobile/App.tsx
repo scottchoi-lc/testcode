@@ -4,15 +4,14 @@ import { Alert, SafeAreaView, StyleSheet } from "react-native";
 
 import { AnalyzeScreen } from "@/screens/AnalyzeScreen";
 import { HomeScreen, SelectedVideo } from "@/screens/HomeScreen";
-import { ResultsScreen } from "@/screens/ResultsScreen";
+import { AnalyzedPlayer, ResultsScreen } from "@/screens/ResultsScreen";
 import { PlayerSelection, SelectPlayerScreen } from "@/screens/SelectPlayerScreen";
-import type { AnalysisResult } from "@/types";
 
 type Screen =
   | { name: "home" }
-  | { name: "selectPlayer"; video: SelectedVideo }
-  | { name: "analyzing"; video: SelectedVideo; selection: PlayerSelection }
-  | { name: "results"; video: SelectedVideo; result: AnalysisResult };
+  | { name: "selectPlayer"; video: SelectedVideo; players: AnalyzedPlayer[] }
+  | { name: "analyzing"; video: SelectedVideo; selection: PlayerSelection; players: AnalyzedPlayer[] }
+  | { name: "results"; video: SelectedVideo; players: AnalyzedPlayer[] };
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>({ name: "home" });
@@ -26,13 +25,15 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
       {screen.name === "home" && (
-        <HomeScreen onVideoSelected={(video) => setScreen({ name: "selectPlayer", video })} />
+        <HomeScreen
+          onVideoSelected={(video) => setScreen({ name: "selectPlayer", video, players: [] })}
+        />
       )}
       {screen.name === "selectPlayer" && (
         <SelectPlayerScreen
           video={screen.video}
           onContinue={(selection) =>
-            setScreen({ name: "analyzing", video: screen.video, selection })
+            setScreen({ name: "analyzing", video: screen.video, selection, players: screen.players })
           }
           onError={handleError}
         />
@@ -40,7 +41,16 @@ export default function App() {
       {screen.name === "analyzing" && (
         <AnalyzeScreen
           selection={screen.selection}
-          onComplete={(result) => setScreen({ name: "results", video: screen.video, result })}
+          onComplete={(result) => {
+            const label = result.detected_player_number
+              ? `Number ${result.detected_player_number}`
+              : `Player ${screen.players.length + 1}`;
+            setScreen({
+              name: "results",
+              video: screen.video,
+              players: [...screen.players, { label, result }],
+            });
+          }}
           onError={handleError}
           onCancel={() => setScreen({ name: "home" })}
         />
@@ -48,7 +58,10 @@ export default function App() {
       {screen.name === "results" && (
         <ResultsScreen
           videoUri={screen.video.uri}
-          result={screen.result}
+          players={screen.players}
+          onAddPlayer={() =>
+            setScreen({ name: "selectPlayer", video: screen.video, players: screen.players })
+          }
           onReset={() => setScreen({ name: "home" })}
         />
       )}

@@ -37,6 +37,16 @@ class ActionSegment(BaseModel):
             "enough, or the segment isn't a dribbling segment."
         ),
     )
+    player_label: Optional[str] = Field(
+        None,
+        description=(
+            "Which tracked player this segment belongs to, e.g. \"Player 2\" or \"Number 23\". "
+            "Only set on segments returned by POST /combine-narratives, which merges several "
+            "separate single-player analyses of the same clip (each one only ever tracks the "
+            "one player it was seeded with) into one shared timeline - see that endpoint. None "
+            "on segments from a normal single-player POST /analyze result."
+        ),
+    )
 
 
 class AnalysisResult(BaseModel):
@@ -62,6 +72,53 @@ class AnalysisResult(BaseModel):
             "True if the caller tapped a specific player in the preview frame (POST /analyze's "
             "selected_box/selected_timestamp) and tracking was seeded from that exact detection. "
             "False if the default heuristic (largest person in frame 0) picked the tracked player."
+        ),
+    )
+
+
+class CombinePlayerInput(BaseModel):
+    label: Optional[str] = Field(
+        None,
+        description=(
+            "How to refer to this player in the combined narrative, e.g. a jersey number "
+            "(\"Number 23\") if you know it. If omitted, auto-numbered by position in "
+            "`players` (1st entry -> \"Player 1\", 2nd -> \"Player 2\", ...)."
+        ),
+    )
+    segments: list[ActionSegment] = Field(
+        ..., description="The `segments` from a completed single-player AnalysisResult for this player"
+    )
+
+
+class CombineNarrativeRequest(BaseModel):
+    players: list[CombinePlayerInput] = Field(
+        ...,
+        min_length=1,
+        description=(
+            "One entry per player, each carrying the `segments` from separately analyzing the "
+            "same clip with that player selected (POST /analyze's selected_box/selected_timestamp, "
+            "run once per player). Not multi-player tracking - each entry is a completely "
+            "independent single-player analysis; this endpoint only merges the results."
+        ),
+    )
+
+
+class CombineNarrativeResponse(BaseModel):
+    narrative: str = Field(
+        "",
+        description=(
+            "Plain-English sequence of events across all players, in chronological order. "
+            "Only DRIBBLING/SHOOTING/PASSING/RECEIVING segments are mentioned - IDLE and "
+            "MOVING_WITHOUT_BALL are noise once multiple players are interleaved, unlike in a "
+            "single player's own narrative where they're still meaningful."
+        ),
+    )
+    segments: list[ActionSegment] = Field(
+        default_factory=list,
+        description=(
+            "The same mentionable segments the narrative is built from, merged across all "
+            "players and sorted chronologically, each with `player_label` set to say who it "
+            "belongs to - for a combined timeline UI, not just the narrative text."
         ),
     )
 

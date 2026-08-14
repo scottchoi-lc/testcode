@@ -436,6 +436,70 @@ there's no tracking connecting them. If that turns out to matter enough to
 be worth the cost, full multi-player tracking (described above) is the
 real fix, not a bigger version of this heuristic.
 
+### Combining several single-player analyses into one sequence of events
+
+The mobile app has two narrative boxes: "movements of the highlighted
+player" (the single-player `narrative` an `AnalysisResult` has always
+had) and "sequence of events" (a `POST /combine-narratives` call that
+merges several *separate* single-player analyses of the same clip into
+one shared timeline).
+
+This isn't real multi-player tracking, and that's deliberate, not a
+shortcut taken for lack of time. The clip that motivated this had three
+players on the same team, in matching jerseys, in one continuous
+possession (dribble → pass → catch → dribble → pass → catch → shoot).
+Two things rule out solving this the "obvious" way, by tracking every
+player at once:
+
+- Appearance-based re-identification (`_appearance_similarity` in
+  `pipeline.py`, HSV color histograms) is how this pipeline tells the
+  tracked player apart from everyone else when the detector's boxes get
+  ambiguous frame to frame. It works by color. Teammates in matching
+  jerseys are, by construction, the one case it cannot distinguish -
+  adding more tracked players wouldn't fix this, it would just multiply
+  the exact same failure mode across every one of them.
+- Jersey-number OCR (`app/models/jersey_ocr.py`) was the other candidate
+  identity signal, and it returns no confident reading on real,
+  imperfect footage more often than not (`guess=None` on this exact
+  clip) - not reliable enough to lean on as the tiebreaker appearance
+  can't provide.
+
+So instead of asking the model to solve an identification problem it
+structurally can't win (same-jersey teammates, unreliable OCR), the
+identification is done by a human instead: the existing tap-to-select
+flow (see "Focusing on a specific player" above) already produces a
+correct single-player analysis whenever a person points at the right
+box. Running that once per player of interest - three `POST /analyze`
+calls for a three-player possession, each seeded by tapping a different
+player in the preview frame - gets three independently-correct
+timelines for free, with no new tracking code. `narrate_combined`
+(`app/pipeline/narration.py`) then just merges them:
+
+1. Tag every segment from every player's `segments` list with that
+   player's label (`player_label`, an `ActionSegment` field only ever
+   set by this path - `None` on a normal single-player result).
+2. Drop IDLE and MOVING_WITHOUT_BALL. They're meaningful in one player's
+   own narrative (the whole story of what they were doing) but become
+   noise once several players' timelines are interleaved - "Player 2
+   moved without the ball" while Player 1 is mid-dribble isn't part of
+   the sequence of events.
+3. Sort what's left chronologically by `start_time`, across all
+   players together.
+4. Walk the sorted list building sentences: a new sentence starts each
+   time the active player changes, and consecutive segments from the
+   same player join with "then" - so a give-and-go reads as "Player 1
+   dribbled the ball, then passed the ball to a nearby player. Player 2
+   received the ball, then dribbled the ball, then passed the ball to a
+   nearby player. Player 3 received the ball, then took a shot."
+
+`POST /combine-narratives` (`app/main.py`) is a thin wrapper: takes a
+list of `{ label?, segments }` (label auto-numbers to "Player 1",
+"Player 2", ... when omitted), calls `narrate_combined`, and returns the
+merged narrative plus the tagged, sorted segments (for a combined
+timeline UI, not just the text). It does no analysis itself and never
+touches a video - purely a merge over results the client already has
+from earlier `/analyze` calls.
+
 ## Running locally
 
 ```bash
@@ -466,6 +530,11 @@ beyond short clips.
   `status` is one of `queued | processing | done | failed`. `result` is
   populated once `status == "done"` and matches `AnalysisResult` in
   `app/schemas.py`.
+- `POST /combine-narratives` — JSON body `{ players: [{ label?, segments }] }`,
+  each `segments` list being the `segments` from a completed single-player
+  `AnalysisResult` (run `/analyze` once per player first). Returns
+  `CombineNarrativeResponse` (`narrative`, `segments`) — see "Combining
+  several single-player analyses into one sequence of events" above.
 - `GET /health` — liveness check.
 
 ## Configuration
