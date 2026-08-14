@@ -313,6 +313,29 @@ false-positive ball hits), rather than keep widening a window that's
 already covering more of the ball's real trajectory than a straight line
 can respect.
 
+### A short pass never counted as "released"
+
+Even with full ball-position data (interpolation covering the whole gap,
+no more dropout), a confirmed pass in a real clip still fell through to
+IDLE. `ball_distances` - added to IDLE's evidence dict specifically to
+debug this, since fraction_possessed alone can't show *where* in a window
+the ball crossed either threshold - showed why:
+`[0.11, 1.0, 1.07, 1.09, 1.1]`. The ball leaves the player's hand cleanly
+(0.11 -> 1.0 in one frame) but only ever reaches about 1.1-1.21 across the
+whole sequence, never anywhere near `BALL_RELEASE_MIN_DIST` (1.6 at the
+time) - the threshold PASSING/SHOOTING require to call something
+"released." That value was set early in this project without a real short
+pass to check it against; it was simply calibrated for a longer, more
+dramatic release than a short pass to a nearby teammate produces.
+
+Lowered to 1.0 - comfortably above `BALL_POSSESSION_MAX_DIST` (0.9, so
+"released" still means something distinct from possession-threshold
+noise) and comfortably below this real pass's observed range, not a
+guess. Affects SHOOTING too (shares the same constant) - no real evidence
+yet either way on shots specifically, worth watching for regressions
+there (a shot mislabeled from a not-fully-released ball) the same
+evidence-first way everything else in this file gets tuned.
+
 ### Telling a crossover dribble apart from a pass
 
 The PASSING branch calls a window a pass when the ball is released, moves

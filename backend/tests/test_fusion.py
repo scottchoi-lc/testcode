@@ -232,14 +232,14 @@ def test_crossover_dribble_not_mistaken_for_passing_when_ball_returns_soon():
 
 
 def test_passing_corroborated_by_strong_kinetics_pass_score_without_clear_release():
-    # The ball only makes it to dist=1.0 (below BALL_RELEASE_MIN_DIST=1.6),
+    # The ball only makes it to dist=0.95 (below BALL_RELEASE_MIN_DIST=1.0),
     # so the direct "released" check alone wouldn't call this a pass - but a
     # strong classifier score for "passing a basketball to a teammate"
     # should be able to corroborate it, the same way dribble_boost/
     # shoot_boost can corroborate their branches.
     frames = [
         _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
-        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=1.0, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=0.95, wrist_high=False),
     ]
     window = WindowSignals(
         0.0, 0.2, frames, kinetics_top_labels=[("passing a basketball to a teammate", 0.35)]
@@ -253,7 +253,7 @@ def test_passing_not_corroborated_by_weak_kinetics_pass_score():
     # to stand in for the missing direct release evidence.
     frames = [
         _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.2, wrist_high=False),
-        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=1.0, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.8, 0.5), dist=0.95, wrist_high=False),
     ]
     window = WindowSignals(
         0.0, 0.2, frames, kinetics_top_labels=[("passing a basketball to a teammate", 0.1)]
@@ -280,6 +280,26 @@ def test_passing_kinetics_corroboration_still_vetoed_by_ball_returns_to_possessi
     )
     result = score_window(window)
     assert result.label != ActionLabel.PASSING
+
+
+def test_short_pass_detected_with_real_clip_evidence():
+    # Real clip: a confirmed short pass to a nearby teammate had
+    # ball_distances=[0.11, 1.0, 1.07, 1.09, 1.1] - starts firmly in-hand,
+    # tops out around 1.1 by the window's end. Under the old
+    # BALL_RELEASE_MIN_DIST=1.6 this never counted as "released" and fell
+    # through to IDLE no matter how the fusion windows were drawn, because
+    # the pass simply never traveled that far. Reproduces that exact
+    # sequence against the corrected threshold (1.0).
+    frames = [
+        _frame(0.0, player=(0.5, 0.5), ball=(0.5, 0.5), dist=0.11, wrist_high=False),
+        _frame(0.2, player=(0.5, 0.5), ball=(0.9, 0.5), dist=1.0, wrist_high=False),
+        _frame(0.4, player=(0.5, 0.5), ball=(1.0, 0.5), dist=1.07, wrist_high=False),
+        _frame(0.6, player=(0.5, 0.5), ball=(1.05, 0.5), dist=1.09, wrist_high=False),
+        _frame(0.8, player=(0.5, 0.5), ball=(1.1, 0.5), dist=1.1, wrist_high=False),
+    ]
+    window = WindowSignals(0.0, 0.8, frames, kinetics_top_labels=[])
+    result = score_window(window)
+    assert result.label == ActionLabel.PASSING
 
 
 def test_dribbling_detected_with_low_possession_fraction_from_real_bounce_pattern():

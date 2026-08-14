@@ -51,7 +51,18 @@ KINETICS_GENERIC_BASKETBALL_LABELS = {
 # Tunable thresholds for the heuristics below. Distances are normalized by
 # the player's bounding-box diagonal so they're roughly scale-invariant.
 BALL_POSSESSION_MAX_DIST = 0.9
-BALL_RELEASE_MIN_DIST = 1.6
+# Was 1.6, tuned early in this project without a real example to check it
+# against. A real clip's confirmed short pass to a nearby teammate
+# (ball_distances starting at 0.11 - firmly in-hand - and topping out
+# around 1.21 several windows later, evidenced via the ball_distances
+# diagnostic added to IDLE's evidence dict) never got anywhere close to
+# 1.6, so the whole release fell through to IDLE instead of PASSING no
+# matter how the fusion windows were drawn - 1.6 was simply calibrated for
+# a longer/more dramatic release than a short pass produces. Lowered to
+# 1.0: comfortably above BALL_POSSESSION_MAX_DIST (still a meaningfully
+# distinct "released" reading, not just possession-threshold noise) and
+# comfortably below this real pass's observed range, rather than a guess.
+BALL_RELEASE_MIN_DIST = 1.0
 DRIBBLE_VERTICAL_STD_MAX = 0.35
 WRIST_ABOVE_SHOULDER_MARGIN = 0.02
 
