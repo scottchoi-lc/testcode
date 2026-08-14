@@ -32,10 +32,30 @@ def test_narrate_builds_play_by_play_in_order():
         "idle": 0.0,
     }
     result = narrate(segments, summary)
-    assert result.startswith("The player dribbled the ball for 3.2s")
-    assert "then moved without the ball for 1.5s" in result
-    assert "then took a shot for 0.8s" in result
+    assert result.startswith(
+        "Player 1 dribbled the ball, then moved without the ball, then took a shot."
+    )
+    assert "3.2s" not in result.split("Overall:")[0]  # no per-event durations before "Overall:"
     assert "Overall: 3.2s dribbling, 1.5s moving without the ball, 0.8s shooting." in result
+
+
+def test_narrate_play_by_play_omits_per_event_durations():
+    # Per-event durations ("dribbled the ball for 0.7s") were noise, not
+    # useful narration detail - removed from the play-by-play clauses.
+    # The "Overall: Xs ..." totals sentence is a different construct (an
+    # aggregate breakdown, matching the mobile app's summary bar chart)
+    # and keeps its durations.
+    segments = [
+        _segment(ActionLabel.DRIBBLING, 0.0, 0.7),
+        _segment(ActionLabel.PASSING, 0.7, 1.4),
+    ]
+    summary = {"dribbling": 0.7, "passing": 0.7, "shooting": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
+    result = narrate(segments, summary)
+    play_by_play, _, totals = result.partition("Overall:")
+    assert "0.7s" not in play_by_play
+    assert "for" not in play_by_play
+    assert play_by_play.strip() == "Player 1 dribbled the ball, then passed the ball."
+    assert "0.7s" in totals
 
 
 def test_narrate_skips_short_idle_gaps_but_keeps_long_ones():
@@ -47,8 +67,8 @@ def test_narrate_skips_short_idle_gaps_but_keeps_long_ones():
     ]
     summary = {"dribbling": 2.0, "passing": 0.7, "shooting": 0.0, "moving_without_ball": 0.0, "idle": 2.3}
     result = narrate(segments, summary)
-    assert "then passed the ball for 0.7s" in result
-    assert "then paused for 2.0s" in result
+    assert "then passed the ball," in result
+    assert "then paused." in result
     assert result.count("paused") == 1
 
 
@@ -59,29 +79,29 @@ def test_narrate_uses_player_number_when_given():
     ]
     summary = {"dribbling": 2.0, "shooting": 0.8, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
     result = narrate(segments, summary, player_number="23")
-    assert result.startswith("Player #23 dribbled the ball for 2.0s")
-    assert "The player" not in result
+    assert result.startswith("Number 23 dribbled the ball,")
+    assert "Player 1" not in result
 
 
 def test_narrate_falls_back_to_generic_wording_without_a_number():
     segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0)]
     summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
     result = narrate(segments, summary, player_number=None)
-    assert result.startswith("The player dribbled")
+    assert result.startswith("Player 1 dribbled")
 
 
 def test_narrate_mentions_dominant_hand_when_known():
     segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0, dominant_hand="left")]
     summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
     result = narrate(segments, summary)
-    assert result.startswith("The player dribbled the ball with the left hand for 2.0s")
+    assert result.startswith("Player 1 dribbled the ball with the left hand.")
 
 
 def test_narrate_omits_hand_when_unknown():
     segments = [_segment(ActionLabel.DRIBBLING, 0.0, 2.0, dominant_hand=None)]
     summary = {"dribbling": 2.0, "shooting": 0.0, "passing": 0.0, "moving_without_ball": 0.0, "idle": 0.0}
     result = narrate(segments, summary)
-    assert result.startswith("The player dribbled the ball for 2.0s")
+    assert result.startswith("Player 1 dribbled the ball.")
     assert "hand" not in result
 
 
@@ -93,5 +113,5 @@ def test_narrate_uses_neutral_wording_for_receiving():
     segments = [_segment(ActionLabel.RECEIVING, 0.0, 1.0)]
     summary = {"receiving": 1.0}
     result = narrate(segments, summary)
-    assert result.startswith("The player received the ball for 1.0s")
+    assert result.startswith("Player 1 received the ball.")
     assert "pass" not in result.lower()

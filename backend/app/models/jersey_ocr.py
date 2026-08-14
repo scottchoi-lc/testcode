@@ -10,7 +10,7 @@ optional enhancement layered on top of the rest of the pipeline, the same
 way pose estimation is: readings are collected across several frames and
 `JerseyNumberAggregator` only returns a number if it was read consistently
 enough to be a plausible majority vote. Otherwise the narration falls back
-to generic "the player" language rather than reporting a guess.
+to a generic "Player 1" subject rather than reporting a guess.
 """
 from __future__ import annotations
 

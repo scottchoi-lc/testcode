@@ -53,7 +53,7 @@ class AnalysisResult(BaseModel):
         None,
         description=(
             "Jersey number read off the tracked player via OCR, if enough frames agreed. "
-            "None means no confident reading - the narrative falls back to generic wording."
+            "None means no confident reading - the narrative falls back to \"Player 1\"."
         ),
     )
     player_selected: bool = Field(

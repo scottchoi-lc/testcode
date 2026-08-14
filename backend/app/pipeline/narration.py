@@ -48,10 +48,9 @@ def _verb_phrase(segment: ActionSegment) -> str:
 def _play_by_play(events: list[ActionSegment], subject: str) -> str:
     clauses = []
     for i, segment in enumerate(events):
-        duration = segment.end_time - segment.start_time
         verb = _verb_phrase(segment)
         prefix = subject if i == 0 else "then"
-        clauses.append(f"{prefix} {verb} for {duration:.1f}s")
+        clauses.append(f"{prefix} {verb}")
     return ", ".join(clauses) + "."
 
 
@@ -80,7 +79,12 @@ def narrate(
     if not events:
         return NO_ACTIONS_MESSAGE
 
-    subject = f"Player #{player_number}" if player_number else "The player"
+    # "Player 1" rather than a generic "the player": this app only ever
+    # tracks one player per analysis, so there's no real disambiguation
+    # need - but a numbered/named subject reads more like a scouting
+    # report than narration prose, matching how the jersey-number case
+    # ("Number 22") already reads.
+    subject = f"Number {player_number}" if player_number else "Player 1"
     narrative = _play_by_play(events, subject)
     totals = _totals_summary(summary)
     if totals:
