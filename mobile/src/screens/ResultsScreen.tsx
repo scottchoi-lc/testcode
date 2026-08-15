@@ -126,6 +126,8 @@ export function ResultsScreen({ videoUri, players, onAddPlayer, onReset }: Props
           <Text style={styles.segmentLabel}>
             {LABEL_TITLES[segment.label]}
             {segment.dominant_hand ? ` (${segment.dominant_hand} hand)` : ""}
+            {segment.shot_made === true ? " (made)" : ""}
+            {segment.shot_made === false ? " (missed)" : ""}
           </Text>
           <Text style={styles.segmentTime}>
             {segment.start_time.toFixed(1)}s – {segment.end_time.toFixed(1)}s (

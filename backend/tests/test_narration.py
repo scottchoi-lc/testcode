@@ -2,7 +2,7 @@ from app.pipeline.narration import NO_ACTIONS_MESSAGE, narrate, narrate_combined
 from app.schemas import ActionLabel, ActionSegment
 
 
-def _segment(label, start, end, dominant_hand=None, evidence=None):
+def _segment(label, start, end, dominant_hand=None, evidence=None, shot_made=None):
     return ActionSegment(
         start_time=start,
         end_time=end,
@@ -10,6 +10,7 @@ def _segment(label, start, end, dominant_hand=None, evidence=None):
         confidence=0.8,
         dominant_hand=dominant_hand,
         evidence=evidence or {},
+        shot_made=shot_made,
     )
 
 
@@ -146,6 +147,29 @@ def test_narrate_uses_plain_wording_when_no_nearby_player_flagged():
     summary = {"passing": 0.5, "receiving": 0.5}
     result = narrate(segments, summary)
     assert result.startswith("Player 1 passed the ball, then received the ball.")
+
+
+def test_narrate_mentions_made_shot():
+    segments = [_segment(ActionLabel.SHOOTING, 0.0, 0.8, shot_made=True)]
+    summary = {"shooting": 0.8}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 took a shot and made it.")
+
+
+def test_narrate_mentions_missed_shot():
+    segments = [_segment(ActionLabel.SHOOTING, 0.0, 0.8, shot_made=False)]
+    summary = {"shooting": 0.8}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 took a shot and missed it.")
+
+
+def test_narrate_omits_outcome_when_shot_made_is_unknown():
+    segments = [_segment(ActionLabel.SHOOTING, 0.0, 0.8, shot_made=None)]
+    summary = {"shooting": 0.8}
+    result = narrate(segments, summary)
+    assert result.startswith("Player 1 took a shot.")
+    assert "made" not in result
+    assert "missed" not in result
 
 
 def test_narrate_combined_empty_input_returns_no_actions_message():

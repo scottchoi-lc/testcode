@@ -49,6 +49,40 @@ class Settings:
         "a person doing an activity unrelated to basketball",
     ]
 
+    # Separate candidate set for a second, narrower X-CLIP call made only
+    # after a SHOOTING segment is found - scoring "did it go in" is a
+    # different question from "what action is this" (ACTION_CANDIDATE_LABELS
+    # above), and mixing the two into one classification would force a
+    # shooting-vs-outcome softmax to compete against dribbling/passing/etc,
+    # diluting both. No hoop/rim detector exists in this pipeline (the
+    # object detector is COCO-class-based - no "basketball hoop" class - see
+    # app/models/detection.py), so this reuses the same zero-shot X-CLIP
+    # model rather than adding a new one, the same way ACTION_CANDIDATE_LABELS
+    # sidesteps Kinetics-400 having no "passing" class.
+    SHOT_OUTCOME_CANDIDATE_LABELS: list[str] = [
+        "a basketball going through the hoop and scoring",
+        "a basketball missing the hoop or bouncing off the rim",
+    ]
+
+    # How long past a SHOOTING segment's end to sample frames for the shot-
+    # outcome call above - long enough for the ball to reach the rim and the
+    # make/miss to be visible on screen, short enough not to run into the
+    # next player action. 2.0s is a starting estimate (real released-shot
+    # flight time, not a rebound chase), not evidence-tuned yet - revisit
+    # against a real clip's outcome-call accuracy the same way BALL_RELEASE_
+    # MIN_DIST and BALL_GAP_INTERPOLATION_MAX_FRAMES were.
+    SHOT_OUTCOME_WINDOW_SECONDS: float = float(os.getenv("SHOT_OUTCOME_WINDOW_SECONDS", "2.0"))
+
+    # Minimum X-CLIP score the top shot-outcome candidate must reach before
+    # the narrative states a make/miss at all. This is a 2-way softmax (see
+    # SHOT_OUTCOME_CANDIDATE_LABELS), so chance level is ~0.5 - unlike
+    # KINETICS_OVERRIDE_MIN's ~1/6 baseline over the full action-label set,
+    # a 2-way score needs to clear a materially higher bar before it's more
+    # than a coin flip. Below this, the segment is left with shot_made=None
+    # (narrative says "took a shot" with no outcome) rather than guessing -
+    # an unverified starting value, same caveat as SHOT_OUTCOME_WINDOW_SECONDS.
+    SHOT_OUTCOME_MIN_CONFIDENCE: float = float(os.getenv("SHOT_OUTCOME_MIN_CONFIDENCE", "0.65"))
+
     # Torch device: "cuda", "mps", or "cpu". Auto-detected at runtime if left as "auto".
     DEVICE: str = os.getenv("DEVICE", "auto")
 

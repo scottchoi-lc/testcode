@@ -56,6 +56,17 @@ def _should_mention(segment: ActionSegment) -> bool:
 def _verb_phrase(segment: ActionSegment) -> str:
     if segment.label == ActionLabel.DRIBBLING and segment.dominant_hand:
         return f"dribbled the ball with the {segment.dominant_hand} hand"
+    if segment.label == ActionLabel.SHOOTING:
+        if segment.shot_made is True:
+            return "took a shot and made it"
+        if segment.shot_made is False:
+            return "took a shot and missed it"
+        # shot_made is None: the outcome classifier wasn't confident enough
+        # (or the shot happened too close to the end of the clip to see the
+        # result) - deliberately says nothing about the outcome rather than
+        # guessing, same "silence over a wrong claim" stance as RECEIVING's
+        # neutral wording below.
+        return _VERB_PHRASES[segment.label]
     # `nearby_other_player` is best-effort, moment-only evidence (see
     # fusion.py's PASSING/RECEIVING branches) - whoever else was near the
     # ball right at the release/arrival, not a tracked identity. Worded to

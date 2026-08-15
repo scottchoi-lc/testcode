@@ -65,14 +65,28 @@ class ActionClassifier:
         self._device = device
         self._num_frames = getattr(self._model.config.vision_config, "num_frames", self._num_frames)
 
-    def classify_window(self, frames_bgr: list[np.ndarray], top_k: int = 5) -> ClipPrediction:
-        """Classify a short clip against `self.candidate_labels` via X-CLIP's
-        zero-shot video-text similarity. `frames_bgr` should have
-        ~`ACTION_WINDOW_FRAMES` frames; it is padded/subsampled to the exact
-        count X-CLIP was trained with."""
+    def classify_window(
+        self,
+        frames_bgr: list[np.ndarray],
+        top_k: int = 5,
+        candidate_labels: list[str] | None = None,
+    ) -> ClipPrediction:
+        """Classify a short clip via X-CLIP's zero-shot video-text
+        similarity, against `self.candidate_labels` by default. `frames_bgr`
+        should have ~`ACTION_WINDOW_FRAMES` frames; it is padded/subsampled
+        to the exact count X-CLIP was trained with.
+
+        `candidate_labels`, if given, scores against a different phrase set
+        for this one call instead (e.g. shot-outcome phrases rather than
+        action-type phrases - see `settings.SHOT_OUTCOME_CANDIDATE_LABELS`)
+        without needing a second `ActionClassifier`/model load - the
+        candidate labels are just the text side of a CLIP-style similarity
+        score, not something baked into the loaded weights.
+        """
         self._ensure_loaded()
         import torch
 
+        labels = candidate_labels if candidate_labels is not None else self.candidate_labels
         frames_rgb = [f[:, :, ::-1] for f in frames_bgr]
         frames_rgb = _resample_to_length(frames_rgb, self._num_frames)
 
@@ -89,7 +103,7 @@ class ActionClassifier:
         # images is None: images = videos` before delegating onward, so
         # passing `images=` directly skips that alias and works identically.
         inputs = self._processor(
-            text=self.candidate_labels, images=frames_rgb, return_tensors="pt", padding=True
+            text=labels, images=frames_rgb, return_tensors="pt", padding=True
         )
         if inputs.get("pixel_values") is None:
             raise RuntimeError(
@@ -103,10 +117,10 @@ class ActionClassifier:
             logits_per_video = self._model(**inputs).logits_per_video[0]
         probs = torch.softmax(logits_per_video, dim=-1)
         top = torch.topk(probs, k=min(top_k, probs.shape[-1]))
-        labels = [
-            (self.candidate_labels[int(idx)], float(score)) for score, idx in zip(top.values, top.indices)
+        top_labels = [
+            (labels[int(idx)], float(score)) for score, idx in zip(top.values, top.indices)
         ]
-        return ClipPrediction(top_labels=labels)
+        return ClipPrediction(top_labels=top_labels)
 
 
 def _resample_to_length(frames: list[np.ndarray], length: int) -> list[np.ndarray]:

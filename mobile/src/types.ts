@@ -17,6 +17,9 @@ export interface ActionSegment {
   confidence: number;
   evidence: Record<string, unknown>;
   dominant_hand: "left" | "right" | null;
+  // Only set for SHOOTING segments: true = made, false = missed, null =
+  // couldn't be confidently determined. Always null for other labels.
+  shot_made?: boolean | null;
   // Only set on segments returned by POST /combine-narratives — which
   // player (e.g. "Player 2") this segment belongs to. null on segments
   // from a normal single-player AnalysisResult.

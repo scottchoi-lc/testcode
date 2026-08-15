@@ -3,6 +3,8 @@ no video I/O - these only need numpy/opencv importable (see README)."""
 import numpy as np
 import pytest
 
+from app.config import settings
+from app.models.action_classifier import ClipPrediction
 from app.models.detection import Detection
 from app.pipeline.fusion import FrameSignals
 from app.pipeline.pipeline import (
@@ -10,6 +12,7 @@ from app.pipeline.pipeline import (
     _ball_was_already_possessed_before,
     _bidirectional_frame_order,
     _build_frame_signals,
+    _classify_shot_outcome,
     _color_histogram,
     _fusion_window_bounds,
     _interpolate_ball_gaps,
@@ -398,3 +401,61 @@ def test_pick_primary_player_falls_back_to_nearest_without_appearance_signal():
         [_person(red_box), _person(blue_box)], previous_center=(28.0, 28.0)
     )
     assert result is not None
+
+
+class _FakeActionClassifier:
+    """Stand-in for `ActionClassifier` - returns a fixed prediction and
+    records what it was called with, so these tests don't need to load a
+    real X-CLIP model."""
+
+    def __init__(self, top_labels):
+        self._top_labels = top_labels
+        self.calls: list[tuple[int, list[str] | None]] = []
+
+    def classify_window(self, frames_bgr, top_k=5, candidate_labels=None):
+        self.calls.append((len(frames_bgr), candidate_labels))
+        return ClipPrediction(top_labels=self._top_labels)
+
+
+def test_classify_shot_outcome_returns_none_with_too_few_frames_after_shot():
+    made_label, _ = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    # Shot ends at 6.3s; only one frame (6.4s) falls inside the outcome
+    # window that follows - not enough to bother calling the classifier.
+    frames = [_frame(0.0), _frame(6.4)]
+    classifier = _FakeActionClassifier([(made_label, 0.9)])
+    result = _classify_shot_outcome(classifier, frames, shot_end_time=6.3)
+    assert result is None
+    assert classifier.calls == []
+
+
+def test_classify_shot_outcome_true_when_made_label_wins_confidently():
+    made_label, missed_label = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    frames = [_frame(6.3), _frame(6.5), _frame(6.7)]
+    classifier = _FakeActionClassifier([(made_label, 0.9), (missed_label, 0.1)])
+    assert _classify_shot_outcome(classifier, frames, shot_end_time=6.3) is True
+    assert classifier.calls == [(3, settings.SHOT_OUTCOME_CANDIDATE_LABELS)]
+
+
+def test_classify_shot_outcome_false_when_missed_label_wins_confidently():
+    made_label, missed_label = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    frames = [_frame(6.3), _frame(6.5), _frame(6.7)]
+    classifier = _FakeActionClassifier([(missed_label, 0.85), (made_label, 0.15)])
+    assert _classify_shot_outcome(classifier, frames, shot_end_time=6.3) is False
+
+
+def test_classify_shot_outcome_none_when_top_score_below_confidence_threshold():
+    made_label, missed_label = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    # Nearly a coin flip - shouldn't be reported as a confident make.
+    frames = [_frame(6.3), _frame(6.5), _frame(6.7)]
+    classifier = _FakeActionClassifier([(made_label, 0.55), (missed_label, 0.45)])
+    assert _classify_shot_outcome(classifier, frames, shot_end_time=6.3) is None
+
+
+def test_classify_shot_outcome_only_passes_frames_within_the_outcome_window():
+    made_label, _ = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    # Shot ends at 6.3s; SHOT_OUTCOME_WINDOW_SECONDS defaults to 2.0s, so a
+    # frame at 9.0s is well past it and must not be included.
+    frames = [_frame(6.3), _frame(6.5), _frame(6.7), _frame(9.0)]
+    classifier = _FakeActionClassifier([(made_label, 0.9)])
+    _classify_shot_outcome(classifier, frames, shot_end_time=6.3)
+    assert classifier.calls[0][0] == 3

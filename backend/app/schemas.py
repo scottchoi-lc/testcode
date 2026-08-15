@@ -37,6 +37,16 @@ class ActionSegment(BaseModel):
             "enough, or the segment isn't a dribbling segment."
         ),
     )
+    shot_made: Optional[bool] = Field(
+        None,
+        description=(
+            "For SHOOTING segments, whether the shot went in (True), missed (False), or "
+            "couldn't be confidently determined (None - either the outcome classifier's "
+            "confidence didn't clear SHOT_OUTCOME_MIN_CONFIDENCE, or the shot happened too "
+            "close to the end of the clip to see the outcome). Always None for non-SHOOTING "
+            "segments."
+        ),
+    )
     player_label: Optional[str] = Field(
         None,
         description=(

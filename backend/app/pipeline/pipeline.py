@@ -459,6 +459,48 @@ def _ball_was_already_possessed_before(
     return False
 
 
+def _classify_shot_outcome(
+    action_classifier, frames: list[Frame], shot_end_time: float
+) -> bool | None:
+    """Best-effort made/missed call for one SHOOTING segment: a second,
+    narrower X-CLIP zero-shot pass (settings.SHOT_OUTCOME_CANDIDATE_LABELS)
+    over the frames right after the shot's release, instead of folding
+    outcome phrases into the main action-type classification (see
+    SHOT_OUTCOME_CANDIDATE_LABELS's comment in config.py for why). No hoop/
+    rim detector exists in this pipeline to check the outcome geometrically
+    - this is the same "ask the zero-shot model directly" approach
+    ACTION_CANDIDATE_LABELS already relies on for action type.
+
+    Returns None (unknown, not a guess) when there aren't at least 2 frames
+    left after the shot to look at - most commonly a shot right at the end
+    of the clip, where the outcome was never actually filmed - or when the
+    top candidate doesn't clear SHOT_OUTCOME_MIN_CONFIDENCE.
+    """
+    window_frames = [
+        f
+        for f in frames
+        if shot_end_time <= f.timestamp <= shot_end_time + settings.SHOT_OUTCOME_WINDOW_SECONDS
+    ]
+    if len(window_frames) < 2:
+        return None
+
+    made_label, missed_label = settings.SHOT_OUTCOME_CANDIDATE_LABELS
+    prediction = action_classifier.classify_window(
+        [f.image for f in window_frames],
+        candidate_labels=settings.SHOT_OUTCOME_CANDIDATE_LABELS,
+    )
+    if not prediction.top_labels:
+        return None
+    top_label, top_score = prediction.top_labels[0]
+    if top_score < settings.SHOT_OUTCOME_MIN_CONFIDENCE:
+        return None
+    if top_label == made_label:
+        return True
+    if top_label == missed_label:
+        return False
+    return None
+
+
 def run_pipeline(
     video_path: str,
     progress_cb: ProgressCallback | None = None,
@@ -657,10 +699,23 @@ def run_pipeline(
         debug_scored_windows.extend(scored_windows)
 
     segments = merge_adjacent_segments(scored_windows)
+
+    for i, segment in enumerate(segments):
+        if segment.label != ActionLabel.SHOOTING:
+            continue
+        shot_made = _classify_shot_outcome(action_classifier, frames, segment.end_time)
+        segments[i] = segment.model_copy(update={"shot_made": shot_made})
+        logger.info(
+            "Shot outcome at %.1f-%.1f: %s",
+            segment.start_time,
+            segment.end_time,
+            "made" if shot_made is True else "missed" if shot_made is False else "unknown",
+        )
+
     logger.info(
         "Segments: %s",
         [
-            (s.label.value, round(s.start_time, 1), round(s.end_time, 1), s.dominant_hand)
+            (s.label.value, round(s.start_time, 1), round(s.end_time, 1), s.dominant_hand, s.shot_made)
             for s in segments
         ],
     )

@@ -436,6 +436,45 @@ there's no tracking connecting them. If that turns out to matter enough to
 be worth the cost, full multi-player tracking (described above) is the
 real fix, not a bigger version of this heuristic.
 
+### Shot outcome (made or missed)
+
+Once a SHOOTING segment is found, a second X-CLIP zero-shot call decides
+whether the shot went in. This is a deliberately separate step from the
+action-type classification everything else in this file uses
+(`settings.ACTION_CANDIDATE_LABELS`) - "what action is this" and "did the
+shot go in" are different questions over different frames (the shooting
+motion itself vs. what happens a moment after release), and scoring them
+together would force outcome phrases to compete against dribbling/
+passing/etc. in one softmax, diluting both. There's no hoop/rim detector
+in this pipeline to check the outcome geometrically - the object detector
+is COCO-class-based (`app/models/detection.py`), and COCO has no
+"basketball hoop" class - so this reuses the same zero-shot-against-
+candidate-phrases approach `ACTION_CANDIDATE_LABELS` already relies on,
+just with its own candidate set (`settings.SHOT_OUTCOME_CANDIDATE_LABELS`,
+`app/config.py`) and its own X-CLIP call (`_classify_shot_outcome` in
+`pipeline.py`) over the frames from the shot's release out to
+`SHOT_OUTCOME_WINDOW_SECONDS` (2.0s default) later - long enough for the
+ball to reach the rim, short enough not to run into the next thing the
+player does. `ActionClassifier.classify_window` takes an optional
+`candidate_labels` override for exactly this - reuses the already-loaded
+X-CLIP weights for the second call instead of loading a whole separate
+model instance.
+
+Because this is only a 2-way softmax (made vs. missed), chance level is
+~0.5, not the ~1/6 baseline `KINETICS_OVERRIDE_MIN` was tuned against
+over the full action-label set - `SHOT_OUTCOME_MIN_CONFIDENCE` (0.65
+default) is deliberately a separate, higher-set constant rather than
+reusing `KINETICS_OVERRIDE_MIN`. Below that bar, or when there simply
+aren't at least 2 frames left in the clip after the shot to look at (e.g.
+a shot right at the very end, where the outcome was never filmed),
+`ActionSegment.shot_made` stays `None` and the narrative says "took a
+shot" with no outcome claim - the same "say nothing rather than guess"
+stance as RECEIVING's neutral wording. Neither of these thresholds has
+real-clip evidence behind it yet (unlike e.g. `BALL_RELEASE_MIN_DIST`) -
+they're reasonable starting points, and the first thing to revisit
+against a real clip's logged `Shot outcome at ...` line if outcome calls
+turn out to be unreliable.
+
 ### Combining several single-player analyses into one sequence of events
 
 The mobile app has two narrative boxes: "movements of the highlighted
